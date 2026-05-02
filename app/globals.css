@@ -3,25 +3,63 @@
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #FAFAF8;
+  --foreground: #1a1a18;
+  --edge-color: #CCCAC4;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+.dark {
+  --background: #111110;
+  --foreground: #e8e8e4;
+  --edge-color: #3A3A38;
 }
 
 body {
-  color: var(--foreground);
   background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  color: var(--foreground);
+  font-family: var(--font-geist-mono), "DM Mono", monospace;
+  font-size: 12px;
 }
 
-@layer utilities {
-  .text-balance {
-    text-wrap: balance;
+/* Node enter animation */
+@keyframes node-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
   }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-node-enter {
+  animation: node-enter 120ms ease-out forwards;
+}
+
+/* Strip React Flow default chrome */
+.react-flow__attribution {
+  display: none;
+}
+
+.react-flow__handle {
+  background: transparent !important;
+  border: none !important;
+  width: 1px !important;
+  height: 1px !important;
+}
+
+.react-flow__edge-path {
+  stroke: var(--edge-color);
+  stroke-width: 0.8;
+}
+
+.react-flow__node.selected .react-flow__node-mindmap {
+  outline: none;
+}
+
+/* Remove default selection box */
+.react-flow__nodesselection-rect,
+.react-flow__selection {
+  display: none;
 }
