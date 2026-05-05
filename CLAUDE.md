@@ -20,12 +20,13 @@ These apply to every prompt without exception:
 - Always name variables and functions descriptively
 - Always separate concerns — one file, one responsibility
 - Always handle loading, error, and empty states in UI
+- Always update CLAUDE.md at the end of every task — Current State + Completed entry
 
 ---
 
 ## What This App Is
 
-Sprig is a keyboard-driven mind map tool. Users create a root concept, which fans out into child nodes in a left-biased radial arc. The aesthetic is deliberate restraint — quiet, scholarly, minimal chrome.
+Sprig is a keyboard-driven mind map tool. Users create a root concept, which fans out into child nodes in a balanced radial triangle (upper-right, left, lower-right). Deeper branches inherit the outward heading of their parent edge and fan ±40° around it. The aesthetic is deliberate restraint — quiet, scholarly, minimal chrome.
 
 Phase 1: UI shell only. No LLM. Working, deployable, beautiful.
 
@@ -54,7 +55,8 @@ Phase 1: UI shell only. No LLM. Working, deployable, beautiful.
   /api/auth/verify/route.ts      GET  — validate token, set cookie, redirect
   /api/maps/route.ts             GET (list), POST (create)
   /api/maps/[mapId]/route.ts     GET (detail), PATCH (auto-save), DELETE
-  /api/nodes/route.ts            POST (create), DELETE (?nodeId=)
+  /api/nodes/route.ts            POST (create), DELETE (?nodeId=, recursive)
+  /api/edges/route.ts            POST (create) — validates map ownership + node membership
   /auth/verify/page.tsx          Fallback "Verifying…" page
   /canvas/page.tsx               Protected canvas page (server component)
   layout.tsx                     Root layout — ThemeProvider + GeistMono font
@@ -115,11 +117,23 @@ Self-referential FK in `nodes.parent_id` uses `(): AnyPgColumn =>` lambda — re
 
 ### Initial state
 - No maps: centered input `"start with a word or concept"` (15 char max, Enter to submit)
-- On submit: creates map + root node + 3 blank child nodes, auto-focuses first child in edit mode
+- On submit: creates map + root node + 3 blank child nodes (all persisted to DB with edges), auto-focuses first child in edit mode
 
 ### Node layout
 - Root at canvas center (0, 0 in React Flow coords)
-- 3 children at 150°, 180°, 210° (left-biased fan), radius 180px from parent
+- 3 root children at 45° (upper-right), 180° (left), 315° (lower-right) — balanced triangle spread, radius 180px
+- Deeper children: inherit the outward heading of the incoming edge and fan ±40° around it
+- Overlap guard: new nodes nudged outward if within 120px of any existing node (max 5 iterations)
+
+### Recursive expansion
+- Triggered by Enter or Tab while editing any non-root node with a non-empty label
+- Skipped if the node already has children
+- Creates 3 blank child nodes + 3 edges, persists all to DB via `POST /api/nodes` and `POST /api/edges`, adds to React Flow state
+- Auto-focuses the first new child in edit mode; works at any depth
+
+### Page reload
+- `GET /api/maps/[mapId]` returns all nodes and edges
+- `parentId` is stored in every React Flow node's `data` object — keyboard nav (`getChildren`, `getParent`, `getSiblings`) all read from `data.parentId`
 
 ### Keyboard map
 | Key | Action |
@@ -128,9 +142,9 @@ Self-referential FK in `nodes.parent_id` uses `(): AnyPgColumn =>` lambda — re
 | Arrow Left | Select parent |
 | Arrow Up / Down | Move between siblings |
 | E or F2 | Enter edit mode |
-| Enter (editing) | Confirm label |
+| Enter (editing) | Confirm label + trigger expansion |
 | Escape (editing) | Cancel, restore previous label |
-| Tab (editing) | Confirm label, move to next sibling edit |
+| Tab (editing) | Confirm label + trigger expansion, move to next sibling edit |
 | Backspace (not editing) | Confirm-delete node and descendants |
 
 ### Auto-save
@@ -193,7 +207,7 @@ npm run db:studio    # open Drizzle Studio
 ## Phase 2 Hooks (do not implement yet)
 
 - Autopilot slider (`SliderBar.tsx`) — currently disabled/decorative; Phase 2 connects to Claude API for AI-suggested child nodes
-- `full_concept` column on `nodes` — stores longer text for AI context when label is abbreviated
+- `full_concept` column on `nodes` — Phase 1: mirrored from `label` at creation time (`fullConcept: label` in `POST /api/nodes`). Phase 2 may write a richer LLM-generated value here without touching `label`.
 - `GhostNode.tsx` — component exists; Phase 2 uses it for LLM suggestions before user confirms
 - `GET /api/maps/[mapId]/suggest` — Phase 2 AI suggestion endpoint (not yet built)
 
@@ -210,4 +224,49 @@ After every task:
 
 ## Current State
 
-Phase 1 scaffolded on 2026-05-02. No migrations run yet — requires `DATABASE_URL`, `RESEND_API_KEY`, `RESEND_FROM`, and `APP_URL` in `.env.local` before `npm run db:push`.
+Phase 1 complete as of 2026-05-05. Core canvas works end-to-end: create map, persist nodes + edges, reload from DB, recursive expansion at any depth. Labels persist immediately on confirm. Layout uses a balanced triangle root fan (45°/180°/315°) with angle inheritance and overlap nudging at every depth. Sidebar supports inline rename and delete. Canvas is fully pannable (left-click drag + two-finger scroll) and zoomable (pinch). `full_concept` is kept in sync with `label` at node creation, ready for Phase 2.
+
+Requires `DATABASE_URL`, `RESEND_API_KEY`, `RESEND_FROM`, and `APP_URL` in `.env.local`. Run `npm run db:push` once to create schema before first use.
+
+---
+
+## Completed
+
+### 2026-05-05 — Edge persistence + recursive expansion
+- Created `app/api/edges/route.ts` — POST validates session, map ownership, and that both nodes belong to the map before inserting
+- Fixed `createMap` to POST edges to DB after creating child nodes (previously only lived in React Flow state)
+- Fixed `loadMap` to include `parentId` in every node's `data` — without this, keyboard nav broke on reload
+- Added `parentId: string | null` and `onEditExpand: () => void` to `MapNodeData` type
+- Implemented recursive expansion: Enter or Tab on a non-empty, childless node creates 3 blank children at the same radial fan, persists to DB, and auto-focuses first child
+- `expandRequest` state + `useEffect([expandRequest])` pattern used to decouple the async expansion from the synchronous event handlers
+
+### 2026-05-05 — Label persistence + layout collision fixes
+- **Label persistence**: `onEditConfirm` now fires an immediate targeted `PATCH /api/maps/[mapId]` for the confirmed node (position + label) in addition to scheduling the debounce. `mapId` added to `getNodeHandlers` dep array to prevent stale-closure bugs. Auto-save debounce already included `label` in its payload — no change needed there.
+- **Angle inheritance**: Replaced fixed `CHILD_ANGLES` constant with `computeChildAngles(parentPos, grandparentPos)`. Root children initially used 150°/180°/210° (later changed — see next entry). All deeper nodes derive a base angle from the grandparent→parent direction (outward heading) and fan ±FAN_SPREAD_DEG around it, so branches spread away from the trunk.
+- **Minimum separation nudge**: `nudgeForSeparation(candidate, existingCenters)` pushes each new child position away from any existing node closer than 120px, up to 5 iterations, along the radial direction of the conflict.
+
+### 2026-05-05 — Balanced triangle layout spread
+- Root fan changed from `[150°, 180°, 210°]` (all left, 60° total arc) to `[45°, 180°, 315°]` — a balanced triangle: upper-right (2 o'clock), left (9 o'clock), lower-right (5 o'clock)
+- `FAN_SPREAD_DEG` widened from 30° to 40° so each arm's children have more angular separation between siblings
+- With angle inheritance, the three arms now radiate into distinct quadrants and don't pile on top of each other at any depth
+- `## What This App Is` and `### Node layout` in CLAUDE.md updated to match
+
+### 2026-05-05 — Sidebar map CRUD (rename + delete)
+- `MapListPanel` extended with `currentMapId` prop (active-row highlight) and `onMapDelete` callback
+- Inline rename: pencil icon on hover → input takes focus with existing title selected → Enter or blur commits via `PATCH /api/maps/[mapId]` with `{ title }` — optimistic update, reverts on failure; Escape cancels
+- Delete: trash icon on hover → `confirm()` guard → `DELETE /api/maps/[mapId]` — optimistic removal, reverts on failure; calls `onMapDelete` so `CanvasShell` clears `currentMapId` if the active map is deleted
+- `CanvasShell` wires `handleMapDelete` and passes `currentMapId` down for active-row highlight
+- No new packages
+
+### 2026-05-05 — Canvas pan + zoom navigation
+- `panOnDrag={true}` — left-click drag on empty canvas now pans (was restricted to middle/right-click only)
+- `panOnScroll={true}` — two-finger trackpad scroll pans the canvas (natural Mac feel)
+- `zoomOnScroll={false}` — scroll no longer zooms; replaced by pan-on-scroll
+- `zoomOnPinch={true}` — pinch gesture zooms in/out (explicit; was already the React Flow v11 default)
+- Standing Instructions updated: always update CLAUDE.md at the end of every task
+
+### 2026-05-05 — full_concept baseline
+- No code changes needed — `POST /api/nodes` already falls back to `label` when `fullConcept` is not provided (`fullConcept: typeof fullConcept === "string" ? fullConcept : label`)
+- Canvas sends `fullConcept: label` for root nodes and `fullConcept: ""` for blank children (matching `label: ""`), so the column is never null and always in sync at creation time
+- PATCH auto-save does NOT write `full_concept` — intentional; Phase 2 will update it independently when the LLM generates a richer value
+- Phase 2 hooks section in CLAUDE.md updated to reflect current state of the column

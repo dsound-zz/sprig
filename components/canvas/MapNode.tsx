@@ -7,11 +7,13 @@ import type { NodeProps } from "reactflow";
 export type MapNodeData = {
   label: string;
   depth: number;
+  parentId: string | null;
   isSelected: boolean;
   isEditing: boolean;
   onLabelChange: (value: string) => void;
   onEditConfirm: () => void;
   onEditCancel: () => void;
+  onEditExpand: () => void;
 };
 
 export function MapNode({ data }: NodeProps<MapNodeData>) {
@@ -68,6 +70,7 @@ export function MapNode({ data }: NodeProps<MapNodeData>) {
             if (e.key === "Enter") {
               e.preventDefault();
               data.onEditConfirm();
+              data.onEditExpand();
             } else if (e.key === "Escape") {
               e.preventDefault();
               data.onEditCancel();

@@ -20,9 +20,21 @@ export function CanvasShell({ initialMapId, userId }: Props) {
     setCurrentMapId(null);
   }
 
+  function handleMapDelete(mapId: string) {
+    // If the deleted map is the one currently on the canvas, clear it
+    if (mapId === currentMapId) {
+      setCurrentMapId(null);
+    }
+  }
+
   return (
     <>
-      <MapListPanel onMapSelect={handleMapSelect} onNewMap={handleNewMap} />
+      <MapListPanel
+        onMapSelect={handleMapSelect}
+        onNewMap={handleNewMap}
+        onMapDelete={handleMapDelete}
+        currentMapId={currentMapId}
+      />
       <MindMapCanvas
         key={currentMapId ?? "new"}
         initialMapId={currentMapId}

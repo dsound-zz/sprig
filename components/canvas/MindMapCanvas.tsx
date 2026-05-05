@@ -22,20 +22,81 @@ const nodeTypes = {
 };
 
 const CHILD_RADIUS = 180;
-// Angles in degrees: 150°, 180°, 210° = left-biased fan at 11, 9, 7 o'clock
-const CHILD_ANGLES = [150, 180, 210];
+// Root fan: 45° (upper-right), 180° (left), 315° (lower-right) — balanced triangle spread
+const ROOT_CHILD_ANGLES = [45, 180, 315];
+// Fan spread: ±40° around the outward direction
+const FAN_SPREAD_DEG = 40;
+// Minimum distance between any two node centers
+const MIN_NODE_SEPARATION = 120;
+// Maximum overlap-nudge iterations
+const MAX_NUDGE_ITERATIONS = 5;
 
 function radialPosition(
   cx: number,
   cy: number,
-  angleDeg: number
+  angleDeg: number,
+  radius = CHILD_RADIUS
 ): { x: number; y: number } {
   const rad = (angleDeg * Math.PI) / 180;
   return {
-    x: cx + CHILD_RADIUS * Math.cos(rad),
+    x: cx + radius * Math.cos(rad),
     // Canvas Y is inverted relative to standard math coords
-    y: cy - CHILD_RADIUS * Math.sin(rad),
+    y: cy - radius * Math.sin(rad),
   };
+}
+
+/**
+ * Derive the three child angles for a given parent node.
+ * If the parent is the root (no grandparent position), use the balanced triangle fan.
+ * Otherwise, compute the outward direction from grandparent → parent,
+ * then fan ±FAN_SPREAD_DEG around that direction.
+ */
+function computeChildAngles(
+  parentPos: { x: number; y: number },
+  grandparentPos: { x: number; y: number } | null
+): number[] {
+  if (!grandparentPos) {
+    // Root node — use the balanced triangle fan
+    return ROOT_CHILD_ANGLES;
+  }
+  // Outward direction = direction parent is relative to grandparent,
+  // i.e. continuing the same heading away from the tree trunk.
+  // Canvas Y is inverted, so we negate dy when computing the angle.
+  const dx = parentPos.x - grandparentPos.x;
+  const dy = -(parentPos.y - grandparentPos.y); // flip for standard math coords
+  const baseAngleDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
+  return [
+    baseAngleDeg - FAN_SPREAD_DEG,
+    baseAngleDeg,
+    baseAngleDeg + FAN_SPREAD_DEG,
+  ];
+}
+
+/**
+ * After placing a candidate position, nudge it away from any existing node
+ * that is closer than MIN_NODE_SEPARATION. Repeats up to MAX_NUDGE_ITERATIONS.
+ */
+function nudgeForSeparation(
+  candidate: { x: number; y: number },
+  existingNodes: Array<{ x: number; y: number }>
+): { x: number; y: number } {
+  let pos = { ...candidate };
+  for (let iter = 0; iter < MAX_NUDGE_ITERATIONS; iter++) {
+    let moved = false;
+    for (const existing of existingNodes) {
+      const dx = pos.x - existing.x;
+      const dy = pos.y - existing.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < MIN_NODE_SEPARATION && dist > 0) {
+        // Nudge along the radial direction away from the existing node
+        const scale = MIN_NODE_SEPARATION / dist;
+        pos = { x: existing.x + dx * scale, y: existing.y + dy * scale };
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+  return pos;
 }
 
 type Props = {
@@ -54,6 +115,7 @@ export function MindMapCanvas({ initialMapId, userId }: Props) {
   const [pendingLabel, setPendingLabel] = useState<string>("");
   const [rootInput, setRootInput] = useState("");
   const [isInitializing, setIsInitializing] = useState(false);
+  const [expandRequest, setExpandRequest] = useState<string | null>(null);
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevLabelsRef = useRef<Record<string, string>>({});
@@ -91,11 +153,13 @@ export function MindMapCanvas({ initialMapId, userId }: Props) {
         data: {
           label: n.label,
           depth: n.depth,
+          parentId: n.parentId,
           isSelected: false,
           isEditing: false,
-          onLabelChange: () => {},
-          onEditConfirm: () => {},
-          onEditCancel: () => {},
+          onLabelChange: () => { },
+          onEditConfirm: () => { },
+          onEditCancel: () => { },
+          onEditExpand: () => { },
         },
       }));
 
@@ -130,6 +194,30 @@ export function MindMapCanvas({ initialMapId, userId }: Props) {
         );
       },
       onEditConfirm: () => {
+        // Immediately persist the confirmed label for this node; the
+        // debounce will also run but this guarantees the label is saved
+        // even if the user closes the tab right after confirming.
+        setNodes((nds) => {
+          const target = nds.find((n) => n.id === nodeId);
+          if (target && mapId) {
+            const label = (target.data as MapNodeData).label;
+            fetch(`/api/maps/${mapId}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                nodes: [
+                  {
+                    id: nodeId,
+                    positionX: target.position.x,
+                    positionY: target.position.y,
+                    label,
+                  },
+                ],
+              }),
+            });
+          }
+          return nds;
+        });
         setEditingNodeId(null);
         scheduleSave();
       },
@@ -139,20 +227,23 @@ export function MindMapCanvas({ initialMapId, userId }: Props) {
           nds.map((n) =>
             n.id === nodeId
               ? {
-                  ...n,
-                  data: {
-                    ...n.data,
-                    label: prevLabelsRef.current[nodeId] ?? currentLabel,
-                    isEditing: false,
-                  },
-                }
+                ...n,
+                data: {
+                  ...n.data,
+                  label: prevLabelsRef.current[nodeId] ?? currentLabel,
+                  isEditing: false,
+                },
+              }
               : n
           )
         );
         setEditingNodeId(null);
       },
+      onEditExpand: () => {
+        setExpandRequest(nodeId);
+      },
     }),
-    [setNodes] // eslint-disable-line react-hooks/exhaustive-deps
+    [setNodes, setExpandRequest, mapId] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   // Keep node data in sync with selection/editing state
@@ -175,6 +266,123 @@ export function MindMapCanvas({ initialMapId, userId }: Props) {
       })
     );
   }, [selectedNodeId, editingNodeId, getNodeHandlers, setNodes]);
+
+  // Expand a node into 3 blank children when a label is confirmed for the first time
+  useEffect(() => {
+    if (!expandRequest || !mapId) return;
+
+    const nodeId = expandRequest;
+    setExpandRequest(null);
+
+    const parentNode = nodes.find((n) => n.id === nodeId);
+    if (!parentNode) return;
+
+    const confirmedLabel = (parentNode.data as MapNodeData).label;
+    if (!confirmedLabel.trim()) return;
+
+    const hasChildren = nodes.some(
+      (n) => (n.data as MapNodeData).parentId === nodeId
+    );
+    if (hasChildren) return;
+
+    const { x: px, y: py } = parentNode.position;
+    const parentDepth = (parentNode.data as MapNodeData).depth;
+    const currentMapId = mapId;
+
+    (async () => {
+      // Determine the grandparent position to compute angle inheritance
+      const grandparentId = (parentNode.data as MapNodeData).parentId;
+      const grandparentNode = grandparentId
+        ? nodes.find((n) => n.id === grandparentId)
+        : null;
+      const grandparentPos = grandparentNode
+        ? grandparentNode.position
+        : null;
+
+      const childAngles = computeChildAngles(
+        { x: px, y: py },
+        grandparentPos
+      );
+
+      // Existing node centers for overlap detection
+      const existingCenters = nodes.map((n) => ({
+        x: n.position.x,
+        y: n.position.y,
+      }));
+
+      // Place children and nudge each one away from existing nodes
+      const childPositions = childAngles.map((angle) => {
+        const raw = radialPosition(px, py, angle);
+        return nudgeForSeparation(raw, existingCenters);
+      });
+      const newChildIds: string[] = [];
+
+      for (const pos of childPositions) {
+        const res = await fetch("/api/nodes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mapId: currentMapId,
+            parentId: nodeId,
+            label: "",
+            fullConcept: "",
+            positionX: pos.x,
+            positionY: pos.y,
+            depth: parentDepth + 1,
+          }),
+        });
+        if (res.ok) {
+          const body = (await res.json()) as { node: { id: string } };
+          newChildIds.push(body.node.id);
+        }
+      }
+
+      for (const childId of newChildIds) {
+        await fetch("/api/edges", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mapId: currentMapId,
+            sourceId: nodeId,
+            targetId: childId,
+          }),
+        });
+      }
+
+      const newRfNodes: Node<MapNodeData>[] = newChildIds.map((id, i) => ({
+        id,
+        type: "mindmap",
+        position: childPositions[i],
+        data: {
+          label: "",
+          depth: parentDepth + 1,
+          parentId: nodeId,
+          isSelected: false,
+          isEditing: false,
+          onLabelChange: () => { },
+          onEditConfirm: () => { },
+          onEditCancel: () => { },
+          onEditExpand: () => { },
+        },
+      }));
+
+      const newRfEdges: Edge[] = newChildIds.map((childId) => ({
+        id: `e-${nodeId}-${childId}`,
+        source: nodeId,
+        target: childId,
+        style: { stroke: "var(--edge-color)", strokeWidth: 0.8 },
+      }));
+
+      setNodes((nds) => [...nds, ...newRfNodes]);
+      setEdges((eds) => [...eds, ...newRfEdges]);
+
+      if (newChildIds.length > 0) {
+        setSelectedNodeId(newChildIds[0]);
+        prevLabelsRef.current[newChildIds[0]] = "";
+        setEditingNodeId(newChildIds[0]);
+      }
+    })();
+  }, [expandRequest]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function scheduleSave() {
     if (!mapId) return;
@@ -233,6 +441,7 @@ export function MindMapCanvas({ initialMapId, userId }: Props) {
         // Let Tab navigate to next sibling while editing
         if (e.key === "Tab") {
           e.preventDefault();
+          setExpandRequest(editingNodeId);
           const siblings = getSiblings(currentNode);
           const idx = siblings.findIndex((n) => n.id === editingNodeId);
           const next = siblings[idx + 1];
@@ -301,21 +510,21 @@ export function MindMapCanvas({ initialMapId, userId }: Props) {
 
   function getChildren(node: Node): Node[] {
     return nodes.filter(
-      (n) => (n.data as MapNodeData & { parentId?: string }).parentId === node.id
+      (n) => n.type === "mindmap" && (n.data as MapNodeData).parentId === node.id
     );
   }
 
   function getParent(node: Node): Node | undefined {
-    const data = node.data as MapNodeData & { parentId?: string };
+    const data = node.data as MapNodeData;
     if (!data.parentId) return undefined;
     return nodes.find((n) => n.id === data.parentId);
   }
 
   function getSiblings(node: Node): Node[] {
-    const data = node.data as MapNodeData & { parentId?: string };
+    const data = node.data as MapNodeData;
     if (!data.parentId) return [node];
     return nodes.filter(
-      (n) => (n.data as MapNodeData & { parentId?: string }).parentId === data.parentId
+      (n) => n.type === "mindmap" && (n.data as MapNodeData).parentId === data.parentId
     );
   }
 
@@ -380,8 +589,8 @@ export function MindMapCanvas({ initialMapId, userId }: Props) {
     };
     const rootId = rootNodeData.node.id;
 
-    // Create 3 blank child nodes at radial positions
-    const childPositions = CHILD_ANGLES.map((angle) =>
+    // Create 3 blank child nodes at radial positions (root uses fixed left-biased fan)
+    const childPositions = ROOT_CHILD_ANGLES.map((angle) =>
       radialPosition(cx, cy, angle)
     );
 
@@ -407,8 +616,17 @@ export function MindMapCanvas({ initialMapId, userId }: Props) {
       }
     }
 
+    // Persist edges to DB
+    for (const childId of childIds) {
+      await fetch("/api/edges", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mapId: newMapId, sourceId: rootId, targetId: childId }),
+      });
+    }
+
     // Build React Flow state
-    const rfRootNode: Node<MapNodeData & { parentId: null }> = {
+    const rfRootNode: Node<MapNodeData> = {
       id: rootId,
       type: "mindmap",
       position: { x: cx, y: cy },
@@ -418,30 +636,31 @@ export function MindMapCanvas({ initialMapId, userId }: Props) {
         parentId: null,
         isSelected: false,
         isEditing: false,
-        onLabelChange: () => {},
-        onEditConfirm: () => {},
-        onEditCancel: () => {},
+        onLabelChange: () => { },
+        onEditConfirm: () => { },
+        onEditCancel: () => { },
+        onEditExpand: () => { },
       },
     };
 
-    const rfChildNodes: Node<MapNodeData & { parentId: string }>[] =
-      childIds.map((id, i) => ({
-        id,
-        type: "mindmap",
-        position: childPositions[i],
-        data: {
-          label: "",
-          depth: 1,
-          parentId: rootId,
-          isSelected: false,
-          isEditing: false,
-          onLabelChange: () => {},
-          onEditConfirm: () => {},
-          onEditCancel: () => {},
-        },
-      }));
+    const rfChildNodes: Node<MapNodeData>[] = childIds.map((id, i) => ({
+      id,
+      type: "mindmap",
+      position: childPositions[i],
+      data: {
+        label: "",
+        depth: 1,
+        parentId: rootId,
+        isSelected: false,
+        isEditing: false,
+        onLabelChange: () => { },
+        onEditConfirm: () => { },
+        onEditCancel: () => { },
+        onEditExpand: () => { },
+      },
+    }));
 
-    const rfEdges: Edge[] = childIds.map((childId, i) => ({
+    const rfEdges: Edge[] = childIds.map((childId) => ({
       id: `e-${rootId}-${childId}`,
       source: rootId,
       target: childId,
@@ -535,8 +754,10 @@ export function MindMapCanvas({ initialMapId, userId }: Props) {
         deleteKeyCode={null}
         selectionKeyCode={null}
         multiSelectionKeyCode={null}
-        panOnDrag={[1, 2]}
-        zoomOnScroll
+        panOnDrag
+        panOnScroll
+        zoomOnScroll={false}
+        zoomOnPinch
         attributionPosition="bottom-right"
         style={{ background: "transparent" }}
       >
@@ -556,8 +777,7 @@ function collectDescendants(
 ): Set<string> {
   const ids = new Set<string>([nodeId]);
   const children = allNodes.filter(
-    (n) =>
-      (n.data as MapNodeData & { parentId?: string }).parentId === nodeId
+    (n) => (n.data as MapNodeData).parentId === nodeId
   );
   for (const child of children) {
     const desc = collectDescendants(child.id, allNodes);
