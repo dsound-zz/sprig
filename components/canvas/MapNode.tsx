@@ -62,7 +62,7 @@ export function MapNode({ data }: NodeProps<MapNodeData>) {
             text-[#1a1a18] dark:text-[#e8e8e4]
           `}
           value={data.label}
-          maxLength={15}
+          maxLength={20}
           onChange={(e) => data.onLabelChange(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") {

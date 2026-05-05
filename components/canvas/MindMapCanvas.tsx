@@ -502,7 +502,7 @@ export function MindMapCanvas({ initialMapId, userId }: Props) {
             w-64
           "
           placeholder="start with a word or concept"
-          maxLength={15}
+          maxLength={20}
           value={rootInput}
           onChange={(e) => setRootInput(e.target.value)}
           onKeyDown={async (e) => {
