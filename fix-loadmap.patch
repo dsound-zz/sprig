@@ -1,0 +1,23 @@
+--- components/canvas/MindMapCanvas.tsx
++++ components/canvas/MindMapCanvas.tsx
+@@ -148,6 +148,7 @@
+   // Load map from DB
+   useEffect(() => {
+     if (!mapId) {
++      // It's a new unsaved map (root input mode)
+       setIsInitializing(false);
+       setNodes([]);
+       setEdges([]);
+@@ -160,6 +161,12 @@
+         return;
+       }
+ 
++      // If we just created this map locally, it already has the root node and
++      // may be spawning ghost nodes or child nodes. We shouldn't wipe them
++      // out with a loadMap call. We only need to load if it's an existing map
++      // we just navigated to.
++      if (nodes.length > 0 && expandRequest?.isNewMap) return;
++
+       const data = (await res.json()) as MapData;
+       const rfNodes: Node<MapNodeData>[] = data.nodes.map((n) => ({
+         id: n.id,

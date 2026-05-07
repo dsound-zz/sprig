@@ -105,6 +105,7 @@ export async function PATCH(
         positionX: number;
         positionY: number;
         label: string;
+        fullConcept: string;
       }> = {};
 
       if (typeof nodeUpdate.positionX === "number") {
@@ -118,6 +119,8 @@ export async function PATCH(
         nodeUpdate.label.length <= 15
       ) {
         updateValues.label = nodeUpdate.label;
+        // Phase 2 placeholder — full_concept may diverge from label in future
+        updateValues.fullConcept = nodeUpdate.label;
       }
 
       if (Object.keys(updateValues).length > 0) {

@@ -5,7 +5,6 @@ import { db } from "@/lib/db";
 import { maps } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { CanvasShell } from "@/components/canvas/CanvasShell";
-import { SliderBar } from "@/components/ui/SliderBar";
 
 export default async function CanvasPage() {
   const cookieStore = cookies();
@@ -29,7 +28,6 @@ export default async function CanvasPage() {
         initialMapId={latestMap?.id ?? null}
         userId={session.userId}
       />
-      <SliderBar />
     </div>
   );
 }

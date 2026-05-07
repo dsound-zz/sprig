@@ -86,48 +86,64 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
   }
 
   const nodeId = request.nextUrl.searchParams.get("nodeId");
-  if (!nodeId) {
-    return NextResponse.json({ error: "nodeId is required" }, { status: 400 });
+  const parentIdParam = request.nextUrl.searchParams.get("parentId");
+
+  if (!nodeId && !parentIdParam) {
+    return NextResponse.json({ error: "nodeId or parentId is required" }, { status: 400 });
   }
 
-  // Verify the node belongs to a map owned by this user
-  const [node] = await db
+  // --- Validate ownership ---
+  // If nodeId is provided, we check that node.
+  // If parentId is provided, we check the parent node.
+  const targetId = nodeId || parentIdParam;
+  const [targetNode] = await db
     .select({ id: nodes.id, mapId: nodes.mapId })
     .from(nodes)
-    .where(eq(nodes.id, nodeId))
+    .where(eq(nodes.id, targetId as string))
     .limit(1);
 
-  if (!node) {
-    return NextResponse.json({ error: "Node not found" }, { status: 404 });
+  if (!targetNode) {
+    return NextResponse.json({ error: "Target node not found" }, { status: 404 });
   }
 
   const [map] = await db
     .select({ id: maps.id })
     .from(maps)
-    .where(and(eq(maps.id, node.mapId), eq(maps.userId, session.userId)))
+    .where(and(eq(maps.id, targetNode.mapId), eq(maps.userId, session.userId)))
     .limit(1);
 
   if (!map) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  // Recursively delete all child nodes (DB cascade handles edges and children
-  // only if FK is cascade — but Postgres set null won't cascade children deletion.
-  // So we do a recursive delete here.)
-  await deleteNodeAndDescendants(nodeId);
+  // Use a single DB transaction to prevent orphaned nodes on failure
+  await db.transaction(async (tx) => {
+    if (nodeId) {
+      await deleteNodeAndDescendants(nodeId, tx);
+    } else if (parentIdParam) {
+      const children = await tx
+        .select({ id: nodes.id })
+        .from(nodes)
+        .where(eq(nodes.parentId, parentIdParam));
+      
+      for (const child of children) {
+        await deleteNodeAndDescendants(child.id, tx);
+      }
+    }
+  });
 
   return NextResponse.json({ ok: true });
 }
 
-async function deleteNodeAndDescendants(nodeId: string): Promise<void> {
-  const children = await db
+async function deleteNodeAndDescendants(nodeId: string, tx: any): Promise<void> {
+  const children = await tx
     .select({ id: nodes.id })
     .from(nodes)
     .where(eq(nodes.parentId, nodeId));
 
   for (const child of children) {
-    await deleteNodeAndDescendants(child.id);
+    await deleteNodeAndDescendants(child.id, tx);
   }
 
-  await db.delete(nodes).where(eq(nodes.id, nodeId));
+  await tx.delete(nodes).where(eq(nodes.id, nodeId));
 }

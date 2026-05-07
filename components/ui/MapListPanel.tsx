@@ -85,11 +85,16 @@ export function MapListPanel({
     }
   }
 
-  async function handleDelete(mapId: string, title: string) {
+  async function handleDelete(mapId: string, title: string, e: React.MouseEvent) {
+    // Stop the click from bubbling to the backdrop, which would close the panel
+    // before the optimistic setMaps update renders.
+    e.stopPropagation();
+
     if (!confirm(`Delete "${title || "untitled"}" and all its nodes?`)) return;
 
-    // Remove from local list immediately
+    // Remove from local list immediately (optimistic)
     setMaps((prev) => prev.filter((m) => m.id !== mapId));
+    onMapDelete?.(mapId);
 
     const res = await fetch(`/api/maps/${mapId}`, { method: "DELETE" });
     if (!res.ok) {
@@ -97,8 +102,6 @@ export function MapListPanel({
       await loadMaps();
       return;
     }
-
-    onMapDelete?.(mapId);
   }
 
   return (
@@ -279,8 +282,7 @@ export function MapListPanel({
                           transition-colors duration-100
                         "
                         onClick={(e) => {
-                          e.stopPropagation();
-                          void handleDelete(map.id, map.title);
+                          void handleDelete(map.id, map.title, e);
                         }}
                       >
                         <svg

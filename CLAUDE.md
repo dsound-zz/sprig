@@ -156,14 +156,14 @@ Self-referential FK in `nodes.parent_id` uses `(): AnyPgColumn =>` lambda — re
 
 ## Visual Tokens
 
-| Token | Light | Dark |
+| Element | Light Mode | Dark Mode |
 |---|---|---|
 | Background | `#FAFAF8` | `#111110` |
-| Node ring | 1px `#CCCAC4` | 1px `#3A3A38` |
-| Selected ring | 1.5px `#888880` | 1.5px `#888880` |
-| Edge lines | 0.8px `#CCCAC4` | 0.8px `#3A3A38` |
+| Node ring | 1px `#A8A49E` | 1px `#5A5A56` |
+| Selected ring | 1.5px `#5C5955` | 1.5px `#AAAAA4` |
+| Edge lines | 0.8px `#A8A49E` | 0.8px `#5A5A56` |
 | Label text | `#1a1a18` | `#e8e8e4` |
-| Muted text | `#888880` | `#888880` |
+| Muted text | `#6B6864` | `#AAAAA4` |
 | Node font | 12px / 400, Geist Mono | same |
 | Root font | 13px / 500, Geist Mono | same |
 | Ghost node | `strokeDasharray="4 4"`, opacity 0.4 | same |
@@ -178,6 +178,7 @@ Self-referential FK in `nodes.parent_id` uses `(): AnyPgColumn =>` lambda — re
 - HTTP status codes: 201 POST / 200 GET / 400 invalid / 401 unauthed / 404 missing / 409 conflict / 500 unexpected
 - Never return stack traces — log internally, respond with generic message
 - Node label max 15 chars — enforced at input (maxLength=15) AND in POST `/api/nodes` (400 if violated)
+- Destructive updates: `DELETE /api/nodes?parentId=xxx` performs a recursive subtree delete bottom-up within a single DB transaction to prevent orphaned nodes.
 
 ---
 
@@ -201,15 +202,17 @@ npm run db:studio    # open Drizzle Studio
 | `RESEND_API_KEY` | Resend API key |
 | `RESEND_FROM` | From address (must be verified domain in Resend) |
 | `APP_URL` | Full base URL, e.g. `http://localhost:3000` |
+| `TOGETHER_AI` | Together AI API key — used by `lib/llm/suggest.ts` for child node suggestions |
 
 ---
 
-## Phase 2 Hooks (do not implement yet)
+## Phase 2 Hooks
 
-- Autopilot slider (`SliderBar.tsx`) — currently disabled/decorative; Phase 2 connects to Claude API for AI-suggested child nodes
-- `full_concept` column on `nodes` — Phase 1: mirrored from `label` at creation time (`fullConcept: label` in `POST /api/nodes`). Phase 2 may write a richer LLM-generated value here without touching `label`.
-- `GhostNode.tsx` — component exists; Phase 2 uses it for LLM suggestions before user confirms
-- `GET /api/maps/[mapId]/suggest` — Phase 2 AI suggestion endpoint (not yet built)
+- Autopilot slider (`SliderBar.tsx`) — **active** in Phase 2; 3 discrete positions: manual (blank nodes), suggest (ghost nodes with LLM labels + keep/replace), auto (recursive LLM persist to chosen depth)
+- `full_concept` column — **kept in sync with `label`** on every `POST /api/nodes` and `PATCH /api/maps/[mapId]`. Phase 2 placeholder — may diverge from `label` in future phases.
+- `GhostNode.tsx` — **active** in Phase 2; renders LLM-suggested labels with Keep/Replace buttons; `isReplacing` puts node into inline edit mode
+- `GET /api/maps/[mapId]/suggest` — **built** in Phase 2; calls `suggestChildLabels` from `lib/llm/suggest.ts`
+- Phase 3: DAG cross-link detection (not yet implemented)
 
 ---
 
@@ -224,9 +227,16 @@ After every task:
 
 ## Current State
 
-Phase 1 complete as of 2026-05-05. Core canvas works end-to-end: create map, persist nodes + edges, reload from DB, recursive expansion at any depth. Labels persist immediately on confirm. Layout uses a balanced triangle root fan (45°/180°/315°) with angle inheritance and overlap nudging at every depth. Sidebar supports inline rename and delete. Canvas is fully pannable (left-click drag + two-finger scroll) and zoomable (pinch). `full_concept` is kept in sync with `label` at node creation, ready for Phase 2.
+Phase 2 live and functional as of 2026-05-05. All three slider modes work end-to-end:
+- **Manual**: 3 blank child nodes on confirm (Phase 1 behavior)
+- **Suggest**: ghost nodes appear immediately, LLM labels populate, Keep/Replace buttons work
+- **Auto**: LLM suggestions auto-accepted and persisted recursively to chosen depth (1–5, capped at 5)
 
-Requires `DATABASE_URL`, `RESEND_API_KEY`, `RESEND_FROM`, and `APP_URL` in `.env.local`. Run `npm run db:push` once to create schema before first use.
+Known-good Together AI model: `meta-llama/Meta-Llama-3-8B-Instruct-Lite` (serverless, confirmed via `/v1/models`).
+LLM label race condition resolved — confirmed label passed directly in suggest POST body, not re-read from DB.
+Map list delete is fully optimistic (no reload required).
+
+Requires `DATABASE_URL`, `RESEND_API_KEY`, `RESEND_FROM`, `APP_URL`, and `TOGETHER_AI` in `.env.local`.
 
 ---
 
@@ -270,3 +280,32 @@ Requires `DATABASE_URL`, `RESEND_API_KEY`, `RESEND_FROM`, and `APP_URL` in `.env
 - Canvas sends `fullConcept: label` for root nodes and `fullConcept: ""` for blank children (matching `label: ""`), so the column is never null and always in sync at creation time
 - PATCH auto-save does NOT write `full_concept` — intentional; Phase 2 will update it independently when the LLM generates a richer value
 - Phase 2 hooks section in CLAUDE.md updated to reflect current state of the column
+
+### 2026-05-05 — Phase 2: LLM integration via Together AI
+- **`lib/llm/suggest.ts`**: `suggestChildLabels(concept, existingLabels)` calls Together AI, returns 3 labels ≤15 chars, returns 3 empty strings on any failure. Model: `meta-llama/Meta-Llama-3-8B-Instruct-Lite` (serverless, confirmed via `/v1/models` — earlier attempts with `Meta-Llama-3.1-8B-Instruct-Turbo` and `Llama-3.2-3B-Instruct-Turbo` failed with `model_not_available`).
+- **`app/api/maps/[mapId]/suggest/route.ts`**: `POST` validates session, map ownership, node membership; collects all existing labels; calls LLM; returns `{ suggestions: string[] }`
+- **`SliderBar.tsx`**: enabled with 3 discrete positions (manual/suggest/auto); `mode` + `onModeChange` props
+- **`CanvasShell.tsx`**: `sliderMode` + `autoDepth` state; depth selector UI (1–5 buttons) shown only in auto mode; passes both to `MindMapCanvas`
+- **`GhostNode.tsx`**: Keep/Replace buttons; `isReplacing` puts node into inline edit; `isExpanding` shows pulsing ring during auto-expand
+- **`MapNode.tsx`**: added `ghost?: boolean` to `MapNodeData` type
+- **`MindMapCanvas.tsx`**: `computeChildPositions` + `persistChildNode` helpers extracted; expansion branches on `sliderModeRef.current`; suggest mode calls `spawnGhostNodes`; auto mode calls `autoExpand` recursively (capped at depth 5); `expandingNodeIds` state drives pulsing ring
+- **`app/api/maps/[mapId]/route.ts`** (PATCH): `full_concept` now written alongside `label` on every label update
+- **`tailwind.config.ts`**: added `animate-ghost-pulse` keyframe (opacity 0.4→0.8→0.4, 1s infinite)
+- `TOGETHER_AI` added to env var table
+
+### 2026-05-05 — Bug fixes: map delete + LLM race + suggest model
+- **Map delete not optimistic** (`MapListPanel.tsx`): `confirm()` dialog caused the backdrop `onClick` to fire (focus-loss side effect), closing the panel before `setMaps` removed the entry. Fixed by calling `e.stopPropagation()` inside `handleDelete` before `confirm()` is invoked.
+- **LLM race condition** (`app/api/maps/[mapId]/suggest/route.ts`, `MindMapCanvas.tsx`): `onEditConfirm` fires an unawaited PATCH to save the label, then `onEditExpand` immediately triggers the suggest call. The suggest route was re-reading the label from DB — which hadn't committed yet — so the LLM received an empty string and returned generic/empty suggestions. Fixed by passing `label: confirmedLabel` in the suggest POST body; the route prefers this client-supplied value. Affects first-round suggest AND auto mode.
+- **Wrong Together AI model**: `Meta-Llama-3.1-8B-Instruct-Turbo` and `Llama-3.2-3B-Instruct-Turbo` both require dedicated (non-serverless) endpoints on this account. Confirmed available serverless models via `GET /v1/models`; switched to `meta-llama/Meta-Llama-3-8B-Instruct-Lite`.
+
+### 2026-05-05 — Subtree Deletion and UX Alignment
+- **Max length**: Reduced `MapNode` input `maxLength` to 15 to match the DB constraint and prompt requirements.
+- **Destructive edits (Suggest & Auto)**: When an official node is edited mid-tree in Suggest or Auto mode, all of its children and their subtrees are recursively deleted.
+- **Single DB Transaction**: Updated `DELETE /api/nodes` to accept `parentId`. When `parentId` is passed, it executes a recursive bottom-up deletion of all descendants within a single Drizzle transaction (`db.transaction`). This prevents orphaned nodes if a failure occurs midway through deletion.
+- **Auto Mode Arrow**: `MapNode` now shows the outward arrow on hover for leaf nodes in Auto mode as well (`isSuggestMode || isAutoMode`), enabling users to trigger expansion from leaf nodes.
+
+### 2026-05-05 — Mode Persistence & Universal Arrow
+- **Persistent Settings**: The slider mode (`manual`, `suggest`, `auto`) and depth selector are now persisted to `localStorage` (`sprig_sliderMode` and `sprig_autoDepth`). This ensures the user's preferred mode survives page reloads and map switches.
+- **Universal Arrow**: The outward-pointing arrow now appears on leaf nodes across ALL modes (Manual, Suggest, Auto). In Manual and Auto modes, clicking the arrow triggers standard expansion (spawning 3 blank nodes or auto-expanding recursively), while in Suggest mode it calls the LLM for ghost node suggestions.
+- **Optimistic Map Deletion**: Fixed an issue where deleting the currently active, newly-created map from the sidebar did not clear the canvas. `MindMapCanvas` now calls `onMapCreated(newMapId)` upon initial DB persistence, ensuring `CanvasShell`'s `currentMapId` state remains synchronized with the database ID.
+- **Mode Fall-Through Fix**: Fixed a bug where hitting `Enter` on a leaf node while in Suggest or Auto mode would incorrectly fall through to the Manual mode logic (spawning 3 blank child nodes). `expandRequest` now correctly distinguishes between `trigger: "enter"` and `trigger: "arrow"` to prevent unintended blank node generation in AI-assisted modes.

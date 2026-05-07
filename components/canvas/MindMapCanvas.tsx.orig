@@ -135,19 +135,10 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevLabelsRef = useRef<Record<string, string>>({});
-  // Track if we just created this map locally so we don't wipe it out by fetching
-  const isCreatedLocallyRef = useRef(false);
 
   // Load map on mount if one exists
   useEffect(() => {
     if (!initialMapId) return;
-
-    if (isCreatedLocallyRef.current) {
-      // Map was just created locally and has active state (e.g. ghost nodes spawning).
-      // We don't want to load from DB and wipe that state out.
-      isCreatedLocallyRef.current = false;
-      return;
-    }
 
     async function loadMap() {
       const res = await fetch(`/api/maps/${initialMapId}`);
@@ -677,14 +668,11 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
     setExpandRequest(null);
 
     const parentNode = nodes.find((n) => n.id === nodeId);
+    console.log("expandRequest firing:", { nodeId, mapId, nodesLength: nodes.length, parentFound: !!parentNode });
     if (!parentNode) return;
 
-    const currentMode = sliderModeRef.current;
-
-    // Guard: empty label means the node wasn't filled in.
-    // In Suggest/Auto modes, we require a label to send to the LLM.
-    // In Manual mode, the user can explicitly click the arrow to spawn more empty bubbles.
-    if (!confirmedLabel.trim() && currentMode !== "manual") return;
+    // Guard: empty label means the node wasn't filled in
+    if (!confirmedLabel.trim()) return;
 
     // Do not expand ghost nodes
     if ((parentNode.data as MapNodeData).ghost) return;
@@ -695,6 +683,7 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
 
     const parentDepth = (parentNode.data as MapNodeData).depth;
     const currentMapId = mapId;
+    const currentMode = sliderModeRef.current;
     const currentAutoDepth = autoDepthRef.current;
     const nodesSnapshot = [...nodes];
 
@@ -1007,7 +996,6 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
 
     const mapData = (await mapRes.json()) as { map: { id: string } };
     const newMapId = mapData.map.id;
-    isCreatedLocallyRef.current = true;
     setMapId(newMapId);
     onMapCreated?.(newMapId);
 

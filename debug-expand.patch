@@ -1,0 +1,8 @@
+--- components/canvas/MindMapCanvas.tsx
++++ components/canvas/MindMapCanvas.tsx
+@@ -668,6 +668,7 @@
+     setExpandRequest(null);
+ 
+     const parentNode = nodes.find((n) => n.id === nodeId);
++    console.log("expandRequest firing:", { nodeId, mapId, nodesLength: nodes.length, parentFound: !!parentNode });
+     if (!parentNode) return;

@@ -18,10 +18,22 @@ const config: Config = {
           dark: "#111110",
         },
         ring: {
-          light: "#CCCAC4",
-          dark: "#3A3A38",
-          selected: "#888880",
+          light: "#A8A49E",
+          dark: "#5A5A56",
+          selected: {
+            light: "#5C5955",
+            dark: "#AAAAA4"
+          },
         },
+      },
+      keyframes: {
+        "ghost-pulse": {
+          "0%, 100%": { opacity: "0.4" },
+          "50%": { opacity: "0.8" },
+        },
+      },
+      animation: {
+        "ghost-pulse": "ghost-pulse 1s ease-in-out infinite",
       },
     },
   },
