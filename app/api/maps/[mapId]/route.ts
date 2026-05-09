@@ -116,7 +116,7 @@ export async function PATCH(
       }
       if (
         typeof nodeUpdate.label === "string" &&
-        nodeUpdate.label.length <= 15
+        nodeUpdate.label.length <= 50
       ) {
         updateValues.label = nodeUpdate.label;
         // Phase 2 placeholder — full_concept may diverge from label in future

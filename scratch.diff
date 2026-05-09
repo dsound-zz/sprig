@@ -1,0 +1,11 @@
+--- components/canvas/MapNode.tsx
++++ components/canvas/MapNode.tsx
+@@ -95,7 +95,7 @@
+   // Always true if ghost is true
+   const showArrow =
+     !data.ghost &&
+-    !data.hasChildren &&
++    data.hasChildren !== true &&
+     !data.isEditing;
+ 
+   const isLeft = Math.abs(arrowAngle) > 90;

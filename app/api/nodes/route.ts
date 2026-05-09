@@ -38,9 +38,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  if (label.length > 20) {
+  if (label.length > 50) {
     return NextResponse.json(
-      { error: "label must be 20 characters or fewer" },
+      { error: "label must be 50 characters or fewer" },
       { status: 400 }
     );
   }

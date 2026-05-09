@@ -83,7 +83,7 @@ export function CanvasShell({ initialMapId, userId }: Props) {
           aria-label="Auto-expand depth"
         >
           <span className="text-[10px] text-[#888880] font-mono opacity-70">depth</span>
-          {[1, 2, 3, 4, 5].map((d) => (
+          {[2, 3].map((d) => (
             <button
               key={d}
               onClick={() => handleDepthChange(d)}

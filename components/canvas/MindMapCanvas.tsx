@@ -171,32 +171,53 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
         }>;
       };
 
-      const rfNodes: Node<MapNodeData>[] = data.nodes.map((n) => ({
-        id: n.id,
-        type: "mindmap",
-        position: { x: n.positionX, y: n.positionY },
-        data: {
-          label: n.label,
-          depth: n.depth,
-          parentId: n.parentId,
-          isSelected: false,
-          isEditing: false,
-          onLabelChange: () => { },
-          onEditConfirm: () => { },
-          onEditCancel: () => { },
-          onEditExpand: () => { },
-        },
-      }));
+      const rfNodes: Node<MapNodeData>[] = data.nodes.map((n) => {
+        const parentNode = n.parentId ? data.nodes.find((p) => p.id === n.parentId) : null;
+        let outwardAngle = 0;
+        if (parentNode) {
+          const dx = n.positionX - parentNode.positionX;
+          const dy = -(n.positionY - parentNode.positionY);
+          outwardAngle = (Math.atan2(dy, dx) * 180) / Math.PI;
+        }
+        const hasChildren = data.nodes.some(child => child.parentId === n.id);
 
-      const rfEdges: Edge[] = data.edges.map((e) => ({
-        id: e.id,
-        source: e.sourceId,
-        target: e.targetId,
-        style: {
-          stroke: "var(--edge-color)",
-          strokeWidth: 0.8,
-        },
-      }));
+        return {
+          id: n.id,
+          type: "mindmap",
+          position: { x: n.positionX, y: n.positionY },
+          data: {
+            label: n.label,
+            depth: n.depth,
+            parentId: n.parentId,
+            outwardAngle,
+            hasChildren,
+            isSuggestMode: sliderMode === "suggest",
+            isAutoMode: sliderMode === "auto",
+            isSelected: false,
+            isEditing: false,
+            onLabelChange: () => { },
+            onEditConfirm: () => { },
+            onEditCancel: () => { },
+            onEditExpand: () => { },
+          },
+        };
+      });
+
+      const rfEdges: Edge[] = data.edges.map((e) => {
+        const sourceNode = data.nodes.find(n => n.id === e.sourceId);
+        const targetNode = data.nodes.find(n => n.id === e.targetId);
+        const isLeft = targetNode && sourceNode ? targetNode.positionX < sourceNode.positionX : false;
+        return {
+          id: e.id,
+          source: e.sourceId,
+          sourceHandle: isLeft ? "left" : "right",
+          target: e.targetId,
+          style: {
+            stroke: "var(--edge-color)",
+            strokeWidth: 0.8,
+          },
+        };
+      });
 
       setNodes(rfNodes);
       setEdges(rfEdges);
@@ -276,8 +297,10 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
     setNodes((nds) => {
       // Pre-calculate parent relationships to optimize hasChildren and outwardAngle
       const childrenSet = new Set(
-        nds.filter(n => n.type !== "ghost" && (n.data as MapNodeData).parentId !== null)
-           .map(n => (n.data as MapNodeData).parentId)
+        nds.filter(n => {
+          const parentId = (n.data as { parentId?: string | null }).parentId;
+          return parentId !== null && parentId !== undefined;
+        }).map(n => (n.data as { parentId: string | null }).parentId)
       );
 
       return nds.map((n) => {
@@ -345,6 +368,13 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
     if (!parentNode || (parentNode.data as MapNodeData).ghost) return;
     if (!label.trim()) return;
 
+    // Robust check: do not spawn more ghosts if it already has children or ghosts!
+    const children = nodes.filter((n) => n.type === "mindmap" && (n.data as MapNodeData).parentId === nodeId);
+    const hasGhostChildren = nodes.some(
+      (n) => n.type === "ghost" && (n.data as GhostNodeData & { parentId: string | null }).parentId === nodeId
+    );
+    if (children.length > 0 || hasGhostChildren) return;
+
     spawnGhostNodes(nodeId, label, mapId, [...nodes]);
   }, [suggestRequest, mapId, nodes]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -410,6 +440,16 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
       const parentId = (ghostData as unknown as { parentId: string | null }).parentId as string | null;
       const depth = (ghostData as unknown as { depth: number }).depth as number ?? 1;
 
+      let outwardAngle = 0;
+      if (parentId) {
+        const parentNode = nds.find((n) => n.id === parentId);
+        if (parentNode) {
+          const dx = ghostNode.position.x - parentNode.position.x;
+          const dy = -(ghostNode.position.y - parentNode.position.y);
+          outwardAngle = (Math.atan2(dy, dx) * 180) / Math.PI;
+        }
+      }
+
       // Persist async — fire and forget (we optimistically update UI)
       (async () => {
         const res = await fetch("/api/nodes", {
@@ -440,6 +480,7 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
                 label,
                 depth,
                 parentId: parentId ?? null,
+                outwardAngle,
                 isSelected: false,
                 isEditing: false,
                 onLabelChange: () => {},
@@ -478,6 +519,7 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
             label,
             depth: gd.depth ?? 1,
             parentId: gd.parentId ?? null,
+            outwardAngle,
             isSelected: false,
             isEditing: false,
             onLabelChange: () => {},
@@ -525,14 +567,20 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
         },
       }));
 
-    const newGhostEdges: Edge[] = ghostIds.map((gid) => ({
+    const newGhostEdges: Edge[] = ghostIds.map((gid, i) => ({
       id: `e-${parentId}-${gid}`,
       source: parentId,
+      sourceHandle: childPositions[i].x < parentNode.position.x ? "left" : "right",
       target: gid,
       style: { stroke: "var(--edge-color)", strokeWidth: 0.8, opacity: 0.4 },
     }));
 
-    setNodes((nds) => [...nds, ...newGhosts]);
+    setNodes((nds) => {
+      const parentUpdated = nds.map((n) =>
+        n.id === parentId ? { ...n, data: { ...n.data, hasChildren: true } } : n
+      );
+      return [...parentUpdated, ...newGhosts];
+    });
     setEdges((eds) => [...eds, ...newGhostEdges]);
 
     // Collect existing labels (not ghosts) for the LLM
@@ -630,6 +678,12 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
       if (!childId) continue;
       newChildIds.push(childId);
       newChildPositions.push(pos);
+
+      let outwardAngle = 0;
+      const dx = pos.x - parentNode.position.x;
+      const dy = -(pos.y - parentNode.position.y);
+      outwardAngle = (Math.atan2(dy, dx) * 180) / Math.PI;
+
       newRfNodes.push({
         id: childId,
         type: "mindmap",
@@ -638,6 +692,7 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
           label,
           depth: parentDepth + 1,
           parentId,
+          outwardAngle,
           isSelected: false,
           isEditing: false,
           onLabelChange: () => {},
@@ -649,12 +704,18 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
       newRfEdges.push({
         id: `e-${parentId}-${childId}`,
         source: parentId,
+        sourceHandle: pos.x < parentNode.position.x ? "left" : "right",
         target: childId,
         style: { stroke: "var(--edge-color)", strokeWidth: 0.8 },
       });
     }
 
-    setNodes((nds) => [...nds, ...newRfNodes]);
+    setNodes((nds) => {
+      const parentUpdated = nds.map((n) =>
+        n.id === parentId ? { ...n, data: { ...n.data, hasChildren: true } } : n
+      );
+      return [...parentUpdated, ...newRfNodes];
+    });
     setEdges((eds) => [...eds, ...newRfEdges]);
     setExpandingNodeIds((prev) => { const s = new Set(prev); s.delete(parentId); return s; });
 
@@ -665,6 +726,77 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
     for (let ci = 0; ci < newChildIds.length; ci++) {
       await autoExpand(newChildIds[ci], newRfNodes[ci].data.label, currentMapId, parentDepth + 1, targetDepth, nextSnapshot);
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Cascade Re-Infer: Update all descendants based on new parent label
+  // ---------------------------------------------------------------------------
+  async function cascadeReInfer(
+    parentNodeId: string,
+    parentLabel: string,
+    currentMapId: string,
+    snapshot: Node[]
+  ) {
+    const children = snapshot.filter(
+      (n) => n.type === "mindmap" && (n.data as MapNodeData).parentId === parentNodeId
+    );
+    if (children.length === 0) return;
+
+    setNodes((nds) =>
+      nds.map((n) =>
+        children.some((c) => c.id === n.id)
+          ? { ...n, data: { ...n.data, isReinferring: true } }
+          : n
+      )
+    );
+
+    const res = await fetch(`/api/maps/${currentMapId}/suggest`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nodeId: parentNodeId, label: parentLabel }),
+    });
+
+    const suggestions: string[] = res.ok
+      ? ((await res.json()) as { suggestions: string[] }).suggestions
+      : ["", "", ""];
+
+    const updatedChildren = children.map((child, i) => ({
+      id: child.id,
+      positionX: child.position.x,
+      positionY: child.position.y,
+      newLabel: suggestions[i] || "...",
+    }));
+
+    setNodes((nds) =>
+      nds.map((n) => {
+        const update = updatedChildren.find((c) => c.id === n.id);
+        if (update) {
+          return { ...n, data: { ...n.data, label: update.newLabel, isReinferring: false } };
+        }
+        return n;
+      })
+    );
+
+    // Persist to DB
+    await fetch(`/api/maps/${currentMapId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        nodes: updatedChildren.map((c) => ({
+          id: c.id,
+          positionX: c.positionX,
+          positionY: c.positionY,
+          label: c.newLabel,
+        })),
+      }),
+    });
+
+    // Recursively update grandchildren
+    await Promise.all(
+      updatedChildren.map((child) =>
+        cascadeReInfer(child.id, child.newLabel, currentMapId, snapshot)
+      )
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -708,22 +840,16 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
 
     if (currentMode === "suggest") {
       if (isNewMap || hasChildren || hasGhostChildren) {
-        // "If a user edits an official node's label: All of that node's children — and their entire subtree below — are deleted"
-        if (hasChildren || hasGhostChildren) {
-          // Send request to delete subtree in single DB transaction
-          fetch(`/api/nodes?parentId=${nodeId}`, { method: "DELETE" }).catch(console.error);
+        if (hasChildren) {
+          // If there are real children, we cascade updates down the tree instead of deleting
+          cascadeReInfer(nodeId, confirmedLabel, currentMapId, nodesSnapshot);
+          return;
+        }
 
-          // Optimistically clear all descendants locally
-          const getDescendantIds = (parentId: string, allNodes: Node[]): string[] => {
-            const children = allNodes.filter(n => 
-              (n.data as MapNodeData | GhostNodeData & { parentId: string | null }).parentId === parentId
-            );
-            return children.flatMap(c => [c.id, ...getDescendantIds(c.id, allNodes)]);
-          };
-          
-          const descendantIds = new Set(getDescendantIds(nodeId, nodesSnapshot));
-          setNodes(nds => nds.filter(n => !descendantIds.has(n.id)));
-          setEdges(eds => eds.filter(e => !descendantIds.has(e.source) && !descendantIds.has(e.target)));
+        // If it only had ghost children, we clear them and spawn new ones
+        if (hasGhostChildren) {
+          setNodes(nds => nds.filter(n => n.type !== "ghost" || (n.data as GhostNodeData & { parentId: string | null }).parentId !== nodeId));
+          setEdges(eds => eds.filter(e => e.source !== nodeId || !e.target.startsWith("ghost-")));
         }
         
         spawnGhostNodes(nodeId, confirmedLabel, currentMapId, nodesSnapshot);
@@ -735,23 +861,8 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
 
     if (currentMode === "auto") {
       // Auto mode edit mid-tree logic
-      // "The LLM replaces only that node's direct children with new inferences. No further expansion..."
       if (hasChildren) {
-        fetch(`/api/nodes?parentId=${nodeId}`, { method: "DELETE" }).catch(console.error);
-
-        // Optimistically clear descendants
-        const getDescendantIds = (parentId: string, allNodes: Node[]): string[] => {
-          const children = allNodes.filter(n => (n.data as MapNodeData).parentId === parentId);
-          return children.flatMap(c => [c.id, ...getDescendantIds(c.id, allNodes)]);
-        };
-        const descendantIds = new Set(getDescendantIds(nodeId, nodesSnapshot));
-        
-        const remainingNodes = nodesSnapshot.filter(n => !descendantIds.has(n.id));
-        setNodes(remainingNodes);
-        setEdges(eds => eds.filter(e => !descendantIds.has(e.source) && !descendantIds.has(e.target)));
-        
-        // Regenerate ONLY direct children (no further expansion)
-        autoExpand(nodeId, confirmedLabel, currentMapId, parentDepth, parentDepth + 1, remainingNodes);
+        cascadeReInfer(nodeId, confirmedLabel, currentMapId, nodesSnapshot);
         return;
       }
 
@@ -795,14 +906,22 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
         });
       }
 
-      const newRfNodes: Node<MapNodeData>[] = newChildIds.map((id, i) => ({
-        id,
-        type: "mindmap",
-        position: childPositions[i],
-        data: {
-          label: "",
-          depth: parentDepth + 1,
-          parentId: nodeId,
+      const newRfNodes: Node<MapNodeData>[] = newChildIds.map((id, i) => {
+        const pos = childPositions[i];
+        let outwardAngle = 0;
+        const dx = pos.x - parentNode.position.x;
+        const dy = -(pos.y - parentNode.position.y);
+        outwardAngle = (Math.atan2(dy, dx) * 180) / Math.PI;
+
+        return {
+          id,
+          type: "mindmap",
+          position: pos,
+          data: {
+            label: "",
+            depth: parentDepth + 1,
+            parentId: nodeId,
+            outwardAngle,
           isSelected: false,
           isEditing: false,
           onLabelChange: () => {},
@@ -810,16 +929,23 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
           onEditCancel: () => {},
           onEditExpand: () => {},
         },
-      }));
+      };
+    });
 
-      const newRfEdges: Edge[] = newChildIds.map((childId) => ({
+      const newRfEdges: Edge[] = newChildIds.map((childId, i) => ({
         id: `e-${nodeId}-${childId}`,
         source: nodeId,
+        sourceHandle: childPositions[i].x < parentNode.position.x ? "left" : "right",
         target: childId,
         style: { stroke: "var(--edge-color)", strokeWidth: 0.8 },
       }));
 
-      setNodes((nds) => [...nds, ...newRfNodes]);
+      setNodes((nds) => {
+        const parentUpdated = nds.map((n) =>
+          n.id === nodeId ? { ...n, data: { ...n.data, hasChildren: true } } : n
+        );
+        return [...parentUpdated, ...newRfNodes];
+      });
       setEdges((eds) => [...eds, ...newRfEdges]);
 
       if (newChildIds.length > 0) {

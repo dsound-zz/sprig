@@ -16,6 +16,8 @@ export type GhostNodeData = {
   onReplaceConfirm?: (label: string) => void;
   /** Whether this ghost is currently being expanded (pulsing ring) */
   isExpanding?: boolean;
+  /** Used to determine Handle orientation */
+  outwardAngle?: number;
 };
 
 export function GhostNode({ data }: NodeProps<GhostNodeData>) {
@@ -42,6 +44,8 @@ export function GhostNode({ data }: NodeProps<GhostNodeData>) {
     }
   }
 
+  const isLeft = Math.abs(data.outwardAngle || 0) > 90;
+
   return (
     <div
       className="flex flex-col items-center gap-1"
@@ -49,7 +53,7 @@ export function GhostNode({ data }: NodeProps<GhostNodeData>) {
     >
       <Handle
         type="target"
-        position={Position.Left}
+        position={isLeft ? Position.Right : Position.Left}
         className="opacity-0 pointer-events-none"
       />
 
@@ -164,8 +168,15 @@ export function GhostNode({ data }: NodeProps<GhostNodeData>) {
       )}
 
       <Handle
+        id="right"
         type="source"
         position={Position.Right}
+        className="opacity-0 pointer-events-none"
+      />
+      <Handle
+        id="left"
+        type="source"
+        position={Position.Left}
         className="opacity-0 pointer-events-none"
       />
     </div>

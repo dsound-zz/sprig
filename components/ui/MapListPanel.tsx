@@ -85,23 +85,27 @@ export function MapListPanel({
     }
   }
 
-  async function handleDelete(mapId: string, title: string, e: React.MouseEvent) {
+  function handleDelete(mapId: string, title: string, e: React.MouseEvent) {
     // Stop the click from bubbling to the backdrop, which would close the panel
     // before the optimistic setMaps update renders.
     e.stopPropagation();
+    e.preventDefault();
 
-    if (!confirm(`Delete "${title || "untitled"}" and all its nodes?`)) return;
+    // Defer the confirm dialog to allow React's synthetic event to finish processing.
+    // This prevents the browser from instantly dismissing the dialog in some environments.
+    setTimeout(async () => {
+      if (!window.confirm(`Delete "${title || "untitled"}" and all its nodes?`)) return;
 
-    // Remove from local list immediately (optimistic)
-    setMaps((prev) => prev.filter((m) => m.id !== mapId));
-    onMapDelete?.(mapId);
+      // Remove from local list immediately (optimistic)
+      setMaps((prev) => prev.filter((m) => m.id !== mapId));
+      onMapDelete?.(mapId);
 
-    const res = await fetch(`/api/maps/${mapId}`, { method: "DELETE" });
-    if (!res.ok) {
-      // Revert on failure
-      await loadMaps();
-      return;
-    }
+      const res = await fetch(`/api/maps/${mapId}`, { method: "DELETE" });
+      if (!res.ok) {
+        // Revert on failure
+        await loadMaps();
+      }
+    }, 10);
   }
 
   return (

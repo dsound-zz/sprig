@@ -18,7 +18,6 @@ export type MapNodeData = {
   isAutoMode?: boolean;
   hasChildren?: boolean;
   outwardAngle?: number;
-  isReinferring?: boolean;
   onArrowClick?: (label: string) => void;
 
   onLabelChange: (value: string) => void;
@@ -55,6 +54,7 @@ export function MapNode({ data }: NodeProps<MapNodeData>) {
   // Convert the math angle (standard polar) back to canvas CSS rotation
   // Canvas Y is inverted, so we flip the angle.
   const arrowAngle = data.outwardAngle !== undefined ? -data.outwardAngle : 0;
+  const isLeft = Math.abs(data.outwardAngle || 0) > 90;
 
   return (
     <div className="relative group flex items-center justify-center">
@@ -75,7 +75,7 @@ export function MapNode({ data }: NodeProps<MapNodeData>) {
       >
         <Handle
           type="target"
-          position={Position.Left}
+          position={isLeft ? Position.Right : Position.Left}
           className="opacity-0 pointer-events-none"
         />
 
@@ -109,10 +109,9 @@ export function MapNode({ data }: NodeProps<MapNodeData>) {
               ${textStyle}
               font-mono text-center
               text-[#1a1a18] dark:text-[#e8e8e4]
-              ${data.isReinferring ? "animate-pulse opacity-50" : ""}
             `}
           >
-            {data.isReinferring ? "..." : (data.label || <span className="opacity-30">·</span>)}
+            {data.label || <span className="opacity-30">·</span>}
           </span>
         )}
 

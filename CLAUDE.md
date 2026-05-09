@@ -230,7 +230,7 @@ After every task:
 Phase 2 live and functional as of 2026-05-05. All three slider modes work end-to-end:
 - **Manual**: 3 blank child nodes on confirm (Phase 1 behavior)
 - **Suggest**: ghost nodes appear immediately, LLM labels populate, Keep/Replace buttons work
-- **Auto**: LLM suggestions auto-accepted and persisted recursively to chosen depth (1–5, capped at 5)
+- **Auto**: LLM suggestions auto-accepted and persisted recursively to chosen depth (2 or 3)
 
 Known-good Together AI model: `meta-llama/Meta-Llama-3-8B-Instruct-Lite` (serverless, confirmed via `/v1/models`).
 LLM label race condition resolved — confirmed label passed directly in suggest POST body, not re-read from DB.
@@ -285,10 +285,10 @@ Requires `DATABASE_URL`, `RESEND_API_KEY`, `RESEND_FROM`, `APP_URL`, and `TOGETH
 - **`lib/llm/suggest.ts`**: `suggestChildLabels(concept, existingLabels)` calls Together AI, returns 3 labels ≤15 chars, returns 3 empty strings on any failure. Model: `meta-llama/Meta-Llama-3-8B-Instruct-Lite` (serverless, confirmed via `/v1/models` — earlier attempts with `Meta-Llama-3.1-8B-Instruct-Turbo` and `Llama-3.2-3B-Instruct-Turbo` failed with `model_not_available`).
 - **`app/api/maps/[mapId]/suggest/route.ts`**: `POST` validates session, map ownership, node membership; collects all existing labels; calls LLM; returns `{ suggestions: string[] }`
 - **`SliderBar.tsx`**: enabled with 3 discrete positions (manual/suggest/auto); `mode` + `onModeChange` props
-- **`CanvasShell.tsx`**: `sliderMode` + `autoDepth` state; depth selector UI (1–5 buttons) shown only in auto mode; passes both to `MindMapCanvas`
+- **`CanvasShell.tsx`**: `sliderMode` + `autoDepth` state; depth selector UI (2 or 3 buttons) shown only in auto mode; passes both to `MindMapCanvas`
 - **`GhostNode.tsx`**: Keep/Replace buttons; `isReplacing` puts node into inline edit; `isExpanding` shows pulsing ring during auto-expand
 - **`MapNode.tsx`**: added `ghost?: boolean` to `MapNodeData` type
-- **`MindMapCanvas.tsx`**: `computeChildPositions` + `persistChildNode` helpers extracted; expansion branches on `sliderModeRef.current`; suggest mode calls `spawnGhostNodes`; auto mode calls `autoExpand` recursively (capped at depth 5); `expandingNodeIds` state drives pulsing ring
+- **`MindMapCanvas.tsx`**: `computeChildPositions` + `persistChildNode` helpers extracted; expansion branches on `sliderModeRef.current`; suggest mode calls `spawnGhostNodes`; auto mode calls `autoExpand` recursively (capped at depth 3); `expandingNodeIds` state drives pulsing ring
 - **`app/api/maps/[mapId]/route.ts`** (PATCH): `full_concept` now written alongside `label` on every label update
 - **`tailwind.config.ts`**: added `animate-ghost-pulse` keyframe (opacity 0.4→0.8→0.4, 1s infinite)
 - `TOGETHER_AI` added to env var table
@@ -309,3 +309,13 @@ Requires `DATABASE_URL`, `RESEND_API_KEY`, `RESEND_FROM`, `APP_URL`, and `TOGETH
 - **Universal Arrow**: The outward-pointing arrow now appears on leaf nodes across ALL modes (Manual, Suggest, Auto). In Manual and Auto modes, clicking the arrow triggers standard expansion (spawning 3 blank nodes or auto-expanding recursively), while in Suggest mode it calls the LLM for ghost node suggestions.
 - **Optimistic Map Deletion**: Fixed an issue where deleting the currently active, newly-created map from the sidebar did not clear the canvas. `MindMapCanvas` now calls `onMapCreated(newMapId)` upon initial DB persistence, ensuring `CanvasShell`'s `currentMapId` state remains synchronized with the database ID.
 - **Mode Fall-Through Fix**: Fixed a bug where hitting `Enter` on a leaf node while in Suggest or Auto mode would incorrectly fall through to the Manual mode logic (spawning 3 blank child nodes). `expandRequest` now correctly distinguishes between `trigger: "enter"` and `trigger: "arrow"` to prevent unintended blank node generation in AI-assisted modes.
+
+### 2026-05-06 — Left-side Arrow and Edge Routing fixes
+- Fixed issue where arrows always pointed right upon reloading a mind map. `loadMap` in `MindMapCanvas.tsx` now synchronously computes `outwardAngle` so newly loaded nodes have their rotation applied immediately.
+- Refactored `MapNode` and `GhostNode` Handles so that nodes on the left side of the tree receive edges on their `Right` boundary and dispatch edges from their `Left` boundary.
+- Edges created in `MindMapCanvas.tsx` (via `loadMap`, suggest mode, auto mode, and manual modes) now explicitly define `sourceHandle: "left" | "right"` depending on whether the child node is to the left or right of its parent. This prevents React Flow Bezier curves from awkwardly looping backwards.
+
+### 2026-05-06 — Hide Arrow during Suggest Mode expansion
+- Modified `childrenSet` computation in `MindMapCanvas.tsx` to include ghost nodes, so that `hasChildren` becomes true immediately when ghost nodes spawn, properly hiding the expand arrow in `MapNode.tsx`.
+
+
