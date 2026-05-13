@@ -22,7 +22,8 @@
     "react-dom": "^18",
     "reactflow": "^11.11.4",
     "resend": "^6.12.2",
-    "uuid": "^14.0.0"
+    "uuid": "^14.0.0",
+    "vercel": "^54.0.0"
   },
   "devDependencies": {
     "@types/node": "^20",
