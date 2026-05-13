@@ -21,7 +21,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Invalid body" }, { status: 400 });
   }
 
-  const { mapId, sourceId, targetId } = body as Record<string, unknown>;
+  const { mapId, sourceId, targetId, edgeType } = body as Record<string, unknown>;
 
   if (
     typeof mapId !== "string" ||
@@ -64,9 +64,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Target node not found" }, { status: 404 });
   }
 
+  const edgeTypeValue =
+    typeof edgeType === "string" &&
+    (edgeType === "tree" || edgeType === "connection")
+      ? edgeType
+      : "tree";
+
   const [edge] = await db
     .insert(edges)
-    .values({ mapId, sourceId, targetId })
+    .values({ mapId, sourceId, targetId, edgeType: edgeTypeValue })
     .returning();
 
   return NextResponse.json({ edge }, { status: 201 });

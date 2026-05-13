@@ -6,9 +6,9 @@
  * Uses Together AI's serverless inference — confirmed available via /v1/models.
  */
 
-const TOGETHER_AI_URL = "https://api.together.xyz/v1/chat/completions";
+export const TOGETHER_AI_URL = "https://api.together.xyz/v1/chat/completions";
 // Confirmed serverless on this account ($0.10/M tokens, fast)
-const MODEL = "meta-llama/Meta-Llama-3-8B-Instruct-Lite";
+export const MODEL = "meta-llama/Meta-Llama-3-8B-Instruct-Lite";
 const MAX_LABEL_LENGTH = 15;
 const SUGGESTION_COUNT = 3;
 

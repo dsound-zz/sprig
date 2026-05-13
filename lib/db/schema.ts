@@ -71,6 +71,7 @@ export const edges = pgTable("edges", {
   targetId: uuid("target_id")
     .notNull()
     .references(() => nodes.id, { onDelete: "cascade" }),
+  edgeType: text("edge_type").notNull().default("tree"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 

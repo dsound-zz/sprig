@@ -227,14 +227,16 @@ After every task:
 
 ## Current State
 
-Phase 2 live and functional as of 2026-05-05. All three slider modes work end-to-end:
-- **Manual**: 3 blank child nodes on confirm (Phase 1 behavior)
-- **Suggest**: ghost nodes appear immediately, LLM labels populate, Keep/Replace buttons work
-- **Auto**: LLM suggestions auto-accepted and persisted recursively to chosen depth (2 or 3)
+Phase 3a implemented as of 2026-05-13. DAG cross-link detection and connection display are live:
+- **"find connections" button** visible on canvas (bottom center, above slider); disabled/faded when fewer than 4 labeled nodes
+- **LLM connection detection**: `lib/llm/connections.ts` → `findConnections()` calls Together AI, returns cross-branch node pairs with a short reason, deduplicates (A→B)/(B→A), caps at 8
+- **Connection edges**: dashed sage-green (`#7C9E87`) overlay edges via custom `connectionEdge` React Flow edge type; render below tree edges
+- **Connection panel**: bottom-right, lists each pair with reason text + keep/dismiss actions + dismiss all
+- **Keep**: persists edge to DB as `edgeType: "connection"`, changes to solid 1.5px, removes from panel
+- **Dismiss / Dismiss all**: removes edge from canvas and panel, no DB write
+- **Page reload**: accepted connection edges restored from DB with permanent solid style; panel does not show accepted connections
 
-Known-good Together AI model: `meta-llama/Meta-Llama-3-8B-Instruct-Lite` (serverless, confirmed via `/v1/models`).
-LLM label race condition resolved — confirmed label passed directly in suggest POST body, not re-read from DB.
-Map list delete is fully optimistic (no reload required).
+Schema: `edges.edge_type` column added (`text`, default `'tree'`), pushed to Neon.
 
 Requires `DATABASE_URL`, `RESEND_API_KEY`, `RESEND_FROM`, `APP_URL`, and `TOGETHER_AI` in `.env.local`.
 
@@ -317,5 +319,24 @@ Requires `DATABASE_URL`, `RESEND_API_KEY`, `RESEND_FROM`, `APP_URL`, and `TOGETH
 
 ### 2026-05-06 — Hide Arrow during Suggest Mode expansion
 - Modified `childrenSet` computation in `MindMapCanvas.tsx` to include ghost nodes, so that `hasChildren` becomes true immediately when ghost nodes spawn, properly hiding the expand arrow in `MapNode.tsx`.
+
+### 2026-05-13 — Phase 3a: DAG cross-link detection
+- **`lib/llm/connections.ts`**: `findConnections(nodes)` — filters out root, sends non-root nodes to Together AI, parses `{ connections: [...] }`, deduplicates A↔B pairs, caps at 8. Returns `[]` on any failure.
+- **`lib/llm/suggest.ts`**: exported `MODEL` and `TOGETHER_AI_URL` constants so `connections.ts` can import them (no second copy).
+- **`app/api/maps/[mapId]/connections/route.ts`**: `POST` — validates session + map ownership, fetches labeled nodes, enforces 4-node minimum (400), calls `findConnections`, returns `{ connections }`. No DB writes.
+- **`lib/db/schema.ts`**: added `edgeType: text('edge_type').notNull().default('tree')` to `edges` table. Pushed to Neon via `db:push`.
+- **`app/api/edges/route.ts`**: accepts optional `edgeType` field (`'tree'` | `'connection'`), defaults to `'tree'`.
+- **`app/api/maps/[mapId]/route.ts`**: GET already uses `db.select()` — `edgeType` included automatically after schema change. Client type annotation updated in `MindMapCanvas.tsx`.
+- **`components/canvas/MindMapCanvas.tsx`**:
+  - `ConnectionEdgeComponent` + `edgeTypes` constant defined outside the component (prevents remounting)
+  - `connectionData: ConnectionEntry[]` state tracks pending (non-accepted) connections for the panel
+  - `isFindingConnections` state drives loading text on button
+  - `handleFindConnections` — POST to connections API, replaces pending connections, preserves accepted
+  - `handleConnectionKeep` — marks edge accepted (solid style), removes from panel, fires POST `/api/edges` with `edgeType: "connection"`
+  - `handleConnectionDismiss` / `handleDismissAll` — removes edge(s) from state and panel
+  - `deleteNode` updated to clean up `connectionData` for deleted nodes
+  - `loadMap` updated to restore `connection` edges from DB as accepted (solid style, no panel entry)
+  - "find connections" button: `fixed bottom-[96px] left-1/2`, always rendered when map loaded, `pointer-events-none opacity-30` when `<4` labeled nodes
+  - Connection panel: `fixed bottom-6 right-6`, canvas background + node ring border, lists pairs with reason + keep/dismiss buttons + dismiss all
 
 

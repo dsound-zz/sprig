@@ -6,8 +6,10 @@ import ReactFlow, {
   useEdgesState,
   Background,
   BackgroundVariant,
+  getBezierPath,
   type Node,
   type Edge,
+  type EdgeProps,
   type NodeMouseHandler,
   type OnNodesChange,
 } from "reactflow";
@@ -22,6 +24,44 @@ const MAX_AUTO_DEPTH = 5;
 const nodeTypes = {
   mindmap: MapNode,
   ghost: GhostNode,
+};
+
+// Custom connection edge — sage green dashed (pending) or solid (accepted)
+function ConnectionEdgeComponent({
+  id,
+  sourceX,
+  sourceY,
+  sourcePosition,
+  targetX,
+  targetY,
+  targetPosition,
+  data,
+}: EdgeProps) {
+  const accepted = (data as { accepted?: boolean } | undefined)?.accepted ?? false;
+  const [edgePath] = getBezierPath({
+    sourceX,
+    sourceY,
+    sourcePosition,
+    targetX,
+    targetY,
+    targetPosition,
+  });
+  return (
+    <path
+      id={id}
+      className="react-flow__edge-path"
+      d={edgePath}
+      stroke="#7C9E87"
+      strokeWidth={accepted ? 1.5 : 1}
+      strokeDasharray={accepted ? undefined : "6 3"}
+      fill="none"
+    />
+  );
+}
+
+// Edge types must be defined outside the component to prevent remounting
+const edgeTypes = {
+  connectionEdge: ConnectionEdgeComponent,
 };
 
 const CHILD_RADIUS = 180;
@@ -102,6 +142,13 @@ function nudgeForSeparation(
   return pos;
 }
 
+type ConnectionEntry = {
+  id: string;
+  sourceId: string;
+  targetId: string;
+  reason: string;
+};
+
 type Props = {
   initialMapId: string | null;
   userId: string;
@@ -127,6 +174,10 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
   const [replacingGhostIds, setReplacingGhostIds] = useState<Set<string>>(new Set());
   // Track which node IDs are currently being auto-expanded (pulsing ring)
   const [expandingNodeIds, setExpandingNodeIds] = useState<Set<string>>(new Set());
+  // Connection detection state (Phase 3a)
+  const [connectionData, setConnectionData] = useState<ConnectionEntry[]>([]);
+  const [isFindingConnections, setIsFindingConnections] = useState(false);
+
   // Ref so async auto-expand loop can read current mode/depth without stale closure
   const sliderModeRef = useRef<SliderMode>(sliderMode);
   const autoDepthRef = useRef<number>(autoDepth);
@@ -168,6 +219,7 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
           id: string;
           sourceId: string;
           targetId: string;
+          edgeType: string;
         }>;
       };
 
@@ -203,24 +255,38 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
         };
       });
 
-      const rfEdges: Edge[] = data.edges.map((e) => {
-        const sourceNode = data.nodes.find(n => n.id === e.sourceId);
-        const targetNode = data.nodes.find(n => n.id === e.targetId);
-        const isLeft = targetNode && sourceNode ? targetNode.positionX < sourceNode.positionX : false;
-        return {
-          id: e.id,
-          source: e.sourceId,
-          sourceHandle: isLeft ? "left" : "right",
-          target: e.targetId,
-          style: {
-            stroke: "var(--edge-color)",
-            strokeWidth: 0.8,
-          },
-        };
-      });
+      const connEdgesFromDB: Edge[] = [];
+      const treeEdgesFromDB: Edge[] = [];
+
+      for (const e of data.edges) {
+        if (e.edgeType === "connection") {
+          connEdgesFromDB.push({
+            id: e.id,
+            source: e.sourceId,
+            target: e.targetId,
+            type: "connectionEdge",
+            data: { accepted: true },
+          });
+        } else {
+          const sourceNode = data.nodes.find(n => n.id === e.sourceId);
+          const targetNode = data.nodes.find(n => n.id === e.targetId);
+          const isLeft = targetNode && sourceNode ? targetNode.positionX < sourceNode.positionX : false;
+          treeEdgesFromDB.push({
+            id: e.id,
+            source: e.sourceId,
+            sourceHandle: isLeft ? "left" : "right",
+            target: e.targetId,
+            style: {
+              stroke: "var(--edge-color)",
+              strokeWidth: 0.8,
+            },
+          });
+        }
+      }
 
       setNodes(rfNodes);
-      setEdges(rfEdges);
+      // Connection edges first so they render below tree edges
+      setEdges([...connEdgesFromDB, ...treeEdgesFromDB]);
     }
 
     loadMap();
@@ -1105,7 +1171,6 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
   async function deleteNode(nodeId: string) {
     await fetch(`/api/nodes?nodeId=${nodeId}`, { method: "DELETE" });
 
-    // Remove the node and all its descendants from local state
     const idsToRemove = collectDescendants(nodeId, nodes);
     setNodes((nds) => nds.filter((n) => !idsToRemove.has(n.id)));
     setEdges((eds) =>
@@ -1113,8 +1178,112 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
         (e) => !idsToRemove.has(e.source) && !idsToRemove.has(e.target)
       )
     );
+    setConnectionData((prev) =>
+      prev.filter(
+        (c) => !idsToRemove.has(c.sourceId) && !idsToRemove.has(c.targetId)
+      )
+    );
     setSelectedNodeId(null);
   }
+
+  // ---------------------------------------------------------------------------
+  // Connection detection handlers (Phase 3a)
+  // ---------------------------------------------------------------------------
+  async function handleFindConnections() {
+    if (!mapId) return;
+    setIsFindingConnections(true);
+    try {
+      const res = await fetch(`/api/maps/${mapId}/connections`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) return;
+      const data = (await res.json()) as {
+        connections: Array<{ sourceId: string; targetId: string; reason: string }>;
+      };
+
+      const newEntries: ConnectionEntry[] = data.connections.map((c) => ({
+        id: `conn-${c.sourceId}-${c.targetId}`,
+        sourceId: c.sourceId,
+        targetId: c.targetId,
+        reason: c.reason,
+      }));
+
+      const newConnEdges: Edge[] = newEntries.map((entry) => {
+        const srcNode = nodes.find((n) => n.id === entry.sourceId);
+        const tgtNode = nodes.find((n) => n.id === entry.targetId);
+        const isTargetLeft =
+          srcNode && tgtNode ? tgtNode.position.x < srcNode.position.x : false;
+        return {
+          id: entry.id,
+          source: entry.sourceId,
+          sourceHandle: isTargetLeft ? "left" : "right",
+          target: entry.targetId,
+          type: "connectionEdge",
+          data: { reason: entry.reason, accepted: false },
+        };
+      });
+
+      setConnectionData(newEntries);
+      setEdges((eds) => {
+        // Preserve accepted connection edges; replace pending ones with fresh results
+        const accepted = eds.filter(
+          (e) =>
+            e.type === "connectionEdge" &&
+            (e.data as { accepted?: boolean } | undefined)?.accepted === true
+        );
+        const tree = eds.filter((e) => e.type !== "connectionEdge");
+        return [...newConnEdges, ...accepted, ...tree];
+      });
+    } finally {
+      setIsFindingConnections(false);
+    }
+  }
+
+  function handleConnectionKeep(connId: string) {
+    const entry = connectionData.find((c) => c.id === connId);
+    if (!entry || !mapId) return;
+
+    setConnectionData((prev) => prev.filter((c) => c.id !== connId));
+    setEdges((eds) =>
+      eds.map((e) =>
+        e.id === connId
+          ? { ...e, data: { ...(e.data as object), accepted: true } }
+          : e
+      )
+    );
+
+    fetch("/api/edges", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mapId,
+        sourceId: entry.sourceId,
+        targetId: entry.targetId,
+        edgeType: "connection",
+      }),
+    });
+  }
+
+  function handleConnectionDismiss(connId: string) {
+    setConnectionData((prev) => prev.filter((c) => c.id !== connId));
+    setEdges((eds) => eds.filter((e) => e.id !== connId));
+  }
+
+  function handleDismissAll() {
+    const pendingIds = new Set(connectionData.map((c) => c.id));
+    setConnectionData([]);
+    setEdges((eds) => eds.filter((e) => !pendingIds.has(e.id)));
+  }
+
+  function getConnectionNodeLabel(nodeId: string): string {
+    const node = nodes.find((n) => n.id === nodeId);
+    return node ? (node.data as MapNodeData).label || "·" : "?";
+  }
+
+  const labeledNodeCount = nodes.filter(
+    (n) => n.type === "mindmap" && (n.data as MapNodeData).label.trim().length > 0
+  ).length;
 
   async function createMap(rootLabel: string) {
     setIsInitializing(true);
@@ -1263,6 +1432,7 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
         onNodeDoubleClick={handleNodeDoubleClick}
         onPaneClick={handlePaneClick}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         fitView
         fitViewOptions={{ padding: 0.4 }}
         minZoom={0.3}
@@ -1283,6 +1453,70 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
           gap={0}
         />
       </ReactFlow>
+
+      {/* Find connections button — visible when map is loaded */}
+      <button
+        onClick={handleFindConnections}
+        disabled={isFindingConnections}
+        className={`
+          fixed left-1/2 -translate-x-1/2
+          text-[10px] font-mono bg-transparent border-none
+          text-[#6B6864] dark:text-[#AAAAA4]
+          transition-opacity
+          ${labeledNodeCount >= 4 && !isFindingConnections
+            ? "cursor-pointer hover:opacity-70"
+            : "pointer-events-none opacity-30"}
+        `}
+        style={{ bottom: "96px" }}
+      >
+        {isFindingConnections ? "thinking..." : "find connections"}
+      </button>
+
+      {/* Connection panel — only when pending connections exist */}
+      {connectionData.length > 0 && (
+        <div
+          className="
+            fixed bottom-6 right-6
+            bg-[#FAFAF8] dark:bg-[#111110]
+            border border-[#A8A49E] dark:border-[#5A5A56]
+            rounded-lg p-3 max-w-[240px] font-mono z-10
+          "
+        >
+          <div className="text-[11px] text-[#6B6864] dark:text-[#AAAAA4] mb-2">
+            connections
+          </div>
+          {connectionData.map((conn) => (
+            <div key={conn.id} className="mb-3">
+              <div className="text-[12px] text-[#1a1a18] dark:text-[#e8e8e4]">
+                {getConnectionNodeLabel(conn.sourceId)} &mdash; {getConnectionNodeLabel(conn.targetId)}
+              </div>
+              <div className="text-[10px] text-[#6B6864] dark:text-[#AAAAA4] mt-0.5 mb-1">
+                {conn.reason}
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => handleConnectionKeep(conn.id)}
+                  className="text-[10px] text-[#6B6864] dark:text-[#AAAAA4] bg-transparent border-none cursor-pointer p-0 hover:text-[#1a1a18] dark:hover:text-[#e8e8e4]"
+                >
+                  keep
+                </button>
+                <button
+                  onClick={() => handleConnectionDismiss(conn.id)}
+                  className="text-[10px] text-[#6B6864] dark:text-[#AAAAA4] bg-transparent border-none cursor-pointer p-0 hover:text-[#1a1a18] dark:hover:text-[#e8e8e4]"
+                >
+                  dismiss
+                </button>
+              </div>
+            </div>
+          ))}
+          <button
+            onClick={handleDismissAll}
+            className="text-[10px] text-[#6B6864] dark:text-[#AAAAA4] bg-transparent border-none cursor-pointer p-0 mt-1 hover:text-[#1a1a18] dark:hover:text-[#e8e8e4]"
+          >
+            dismiss all
+          </button>
+        </div>
+      )}
     </div>
   );
 }
