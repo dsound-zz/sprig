@@ -56,7 +56,7 @@ export function LoginForm() {
         </p>
       )}
 
-      <p className="text-[12px] font-mono text-[#6B6864] dark:text-[#AAAAA4]">
+      <p className="text-[17px] font-mono text-[#6B6864] dark:text-[#AAAAA4]">
         enter your email to sign in
       </p>
 
@@ -71,7 +71,7 @@ export function LoginForm() {
         disabled={loading}
         className="
           w-full bg-transparent border-none outline-none
-          text-[13px] font-mono text-center
+          text-[15px] font-mono text-center
           text-[#1a1a18] dark:text-[#e8e8e4]
           placeholder:text-[#85827e] dark:placeholder:text-[#454541]
           disabled:opacity-50
