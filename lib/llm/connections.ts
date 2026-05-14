@@ -128,14 +128,15 @@ Format: { "connections": [{ "sourceId": "n0", "targetId": "n3", "reason": "brief
       return [];
     }
 
-    const cleaned = content
-      .replace(/^```(?:json)?\s*/i, "")
-      .replace(/\s*```\s*$/i, "")
-      .trim();
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      console.error("[connections] No JSON object found in response. Raw content:", content);
+      return [];
+    }
 
     let parsed: unknown;
     try {
-      parsed = JSON.parse(cleaned);
+      parsed = JSON.parse(jsonMatch[0]);
     } catch {
       console.error("[connections] Could not parse LLM JSON. Raw content:", content);
       return [];
