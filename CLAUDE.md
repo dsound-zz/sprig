@@ -227,18 +227,25 @@ After every task:
 
 ## Current State
 
-Phase 3a implemented as of 2026-05-13. DAG cross-link detection and connection display are live:
-- **"find connections" button** visible on canvas (bottom center, above slider); disabled/faded when fewer than 4 labeled nodes
-- **LLM connection detection**: `lib/llm/connections.ts` → `findConnections()` calls Together AI, returns cross-branch node pairs with a short reason, deduplicates (A→B)/(B→A), caps at 8
+Phase 3a fully deployed as of 2026-05-13. DAG cross-link detection and connection display are live on Vercel (https://sprig-lac.vercel.app):
+- **"find connections" button** visible on canvas (bottom center, above slider); disabled/faded when fewer than 4 labeled nodes; sliderMode-aware positioning (152px from bottom in auto mode, 96px otherwise) to avoid colliding with depth selector
+- **Status feedback**: button shows "thinking..." during fetch; shows inline message ("no connections found", error text) on empty/failed result
+- **LLM connection detection**: `lib/llm/connections.ts` → `findConnections()` calls Together AI with a branch-grouped prompt (Branch A / Branch B / ...) using short indices (n0, n1, ...) instead of UUIDs to prevent hallucination; maps back to real IDs after parsing; deduplicates (A→B)/(B→A); caps at 8
 - **Connection edges**: dashed sage-green (`#7C9E87`) overlay edges via custom `connectionEdge` React Flow edge type; render below tree edges
-- **Connection panel**: bottom-right, lists each pair with reason text + keep/dismiss actions + dismiss all
+- **Connection panel**: bottom-right, lists each pair with reason text + keep/dismiss actions + dismiss all; all text at legible sizes (13px labels, 12px reasons/actions)
 - **Keep**: persists edge to DB as `edgeType: "connection"`, changes to solid 1.5px, removes from panel
 - **Dismiss / Dismiss all**: removes edge from canvas and panel, no DB write
 - **Page reload**: accepted connection edges restored from DB with permanent solid style; panel does not show accepted connections
 
 Schema: `edges.edge_type` column added (`text`, default `'tree'`), pushed to Neon.
 
-Requires `DATABASE_URL`, `RESEND_API_KEY`, `RESEND_FROM`, `APP_URL`, and `TOGETHER_AI` in `.env.local`.
+Deployed to Vercel. All 6 env vars set in Vercel production: `DATABASE_URL`, `RESEND_API_KEY`, `RESEND_FROM`, `APP_URL` (https://sprig-lac.vercel.app), `SESSION_SECRET`, `TOGETHER_AI`.
+
+Infrastructure fixes applied for Vercel compatibility:
+- `lib/db/index.ts`: lazy Proxy init — `neon()` only called on first DB access, not at module load time (prevents build-time crash)
+- `lib/auth/magic-link.ts`: `getResend()` lazy getter — Resend client only instantiated on first use
+
+Requires `DATABASE_URL`, `RESEND_API_KEY`, `RESEND_FROM`, `APP_URL`, `SESSION_SECRET`, and `TOGETHER_AI` in `.env.local`.
 
 ---
 
@@ -338,5 +345,20 @@ Requires `DATABASE_URL`, `RESEND_API_KEY`, `RESEND_FROM`, `APP_URL`, and `TOGETH
   - `loadMap` updated to restore `connection` edges from DB as accepted (solid style, no panel entry)
   - "find connections" button: `fixed bottom-[96px] left-1/2`, always rendered when map loaded, `pointer-events-none opacity-30` when `<4` labeled nodes
   - Connection panel: `fixed bottom-6 right-6`, canvas background + node ring border, lists pairs with reason + keep/dismiss buttons + dismiss all
+
+### 2026-05-13 — Vercel deployment fixes
+- **Lazy DB init** (`lib/db/index.ts`): replaced module-level `neon()` call with a `Proxy` that defers initialization to first use. Prevents Next.js build-time crash ("No database connection string") when collecting page data without `DATABASE_URL` in the build environment.
+- **Lazy Resend init** (`lib/auth/magic-link.ts`): replaced module-level `new Resend()` with a `getResend()` getter. Same class of build-time crash — Resend throws "Missing API key" at import time.
+- **Env var setup**: all 6 production env vars pushed to Vercel via `vercel env add` loop from `.env.local`. `APP_URL` updated to `https://sprig-lac.vercel.app`.
+
+### 2026-05-13 — UI legibility pass
+- **Login form** (`LoginForm.tsx`): added "enter your email to sign in" label above input (primary text color); placeholder updated to `#A8A49E` / `#5A5A56` (standard muted token); button color set to full primary text with hover opacity.
+- **Find connections button**: bumped from `10px` to `13px`, color changed from muted to full primary text; sliderMode-aware bottom position (96px vs 152px) to avoid collision with depth selector in auto mode; inline status message below button ("no connections found", error text) replaces silent failure.
+- **Connection panel**: title 13px medium weight; pair labels 13px; reason text 12px at medium-dark tone; keep/dismiss buttons 12px primary text; panel padding increased.
+- **Ghost nodes**: opacity raised from `0.4` to `0.75`; ring stroke darkened from `#CCCAC4` to `#A8A49E`; label opacity removed and bumped to `12px`; keep/edit buttons `9px` → `11px` with primary text and darker border.
+
+### 2026-05-13 — LLM connection prompt fix
+- **Root cause**: `meta-llama/Meta-Llama-3-8B-Instruct-Lite` reliably hallucinated or truncated UUIDs when asked to copy them back in JSON, causing all parsed connections to fail the ID validation check and return `[]`.
+- **Fix**: switched to short indices (`n0`, `n1`, ...) in the prompt with a server-side map back to real UUIDs. Also restructured prompt to present nodes grouped by branch (Branch A / Branch B / ...) so the model clearly understands which nodes share a branch vs. which are candidates for cross-linking. `max_tokens` raised to 600, temperature lowered to 0.4.
 
 
