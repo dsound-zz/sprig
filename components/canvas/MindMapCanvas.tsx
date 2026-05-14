@@ -1474,7 +1474,9 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
           onClick={handleFindConnections}
           disabled={isFindingConnections}
           className={`
-            text-[13px] font-mono bg-transparent border-none
+            text-[13px] font-mono bg-transparent
+            px-3 py-1 rounded-md
+            border border-[#A8A49E] dark:border-[#5A5A56]
             text-[#1a1a18] dark:text-[#e8e8e4]
             transition-opacity
             ${labeledNodeCount >= 4 && !isFindingConnections
