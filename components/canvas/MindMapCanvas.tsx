@@ -177,6 +177,7 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
   // Connection detection state (Phase 3a)
   const [connectionData, setConnectionData] = useState<ConnectionEntry[]>([]);
   const [isFindingConnections, setIsFindingConnections] = useState(false);
+  const [connectionStatusMsg, setConnectionStatusMsg] = useState<string | null>(null);
 
   // Ref so async auto-expand loop can read current mode/depth without stale closure
   const sliderModeRef = useRef<SliderMode>(sliderMode);
@@ -1192,15 +1193,25 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
   async function handleFindConnections() {
     if (!mapId) return;
     setIsFindingConnections(true);
+    setConnectionStatusMsg(null);
     try {
       const res = await fetch(`/api/maps/${mapId}/connections`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+        setConnectionStatusMsg(errBody.error ?? "something went wrong");
+        return;
+      }
       const data = (await res.json()) as {
         connections: Array<{ sourceId: string; targetId: string; reason: string }>;
       };
+
+      if (data.connections.length === 0) {
+        setConnectionStatusMsg("no connections found");
+        return;
+      }
 
       const newEntries: ConnectionEntry[] = data.connections.map((c) => ({
         id: `conn-${c.sourceId}-${c.targetId}`,
@@ -1455,22 +1466,30 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
       </ReactFlow>
 
       {/* Find connections button — visible when map is loaded */}
-      <button
-        onClick={handleFindConnections}
-        disabled={isFindingConnections}
-        className={`
-          fixed left-1/2 -translate-x-1/2
-          text-[10px] font-mono bg-transparent border-none
-          text-[#6B6864] dark:text-[#AAAAA4]
-          transition-opacity
-          ${labeledNodeCount >= 4 && !isFindingConnections
-            ? "cursor-pointer hover:opacity-70"
-            : "pointer-events-none opacity-30"}
-        `}
-        style={{ bottom: "96px" }}
+      <div
+        className="fixed left-1/2 -translate-x-1/2 flex flex-col items-center gap-1"
+        style={{ bottom: sliderMode === "auto" ? "152px" : "96px" }}
       >
-        {isFindingConnections ? "thinking..." : "find connections"}
-      </button>
+        <button
+          onClick={handleFindConnections}
+          disabled={isFindingConnections}
+          className={`
+            text-[13px] font-mono bg-transparent border-none
+            text-[#1a1a18] dark:text-[#e8e8e4]
+            transition-opacity
+            ${labeledNodeCount >= 4 && !isFindingConnections
+              ? "cursor-pointer hover:opacity-60"
+              : "pointer-events-none opacity-30"}
+          `}
+        >
+          {isFindingConnections ? "thinking..." : "find connections"}
+        </button>
+        {connectionStatusMsg && (
+          <span className="text-[11px] font-mono text-[#6B6864] dark:text-[#AAAAA4]">
+            {connectionStatusMsg}
+          </span>
+        )}
+      </div>
 
       {/* Connection panel — only when pending connections exist */}
       {connectionData.length > 0 && (
@@ -1479,30 +1498,30 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
             fixed bottom-6 right-6
             bg-[#FAFAF8] dark:bg-[#111110]
             border border-[#A8A49E] dark:border-[#5A5A56]
-            rounded-lg p-3 max-w-[240px] font-mono z-10
+            rounded-lg p-4 max-w-[260px] font-mono z-10
           "
         >
-          <div className="text-[11px] text-[#6B6864] dark:text-[#AAAAA4] mb-2">
+          <div className="text-[13px] font-medium text-[#1a1a18] dark:text-[#e8e8e4] mb-3">
             connections
           </div>
           {connectionData.map((conn) => (
-            <div key={conn.id} className="mb-3">
-              <div className="text-[12px] text-[#1a1a18] dark:text-[#e8e8e4]">
+            <div key={conn.id} className="mb-4">
+              <div className="text-[13px] text-[#1a1a18] dark:text-[#e8e8e4]">
                 {getConnectionNodeLabel(conn.sourceId)} &mdash; {getConnectionNodeLabel(conn.targetId)}
               </div>
-              <div className="text-[10px] text-[#6B6864] dark:text-[#AAAAA4] mt-0.5 mb-1">
+              <div className="text-[12px] text-[#5C5955] dark:text-[#AAAAA4] mt-1 mb-1.5">
                 {conn.reason}
               </div>
               <div className="flex gap-3">
                 <button
                   onClick={() => handleConnectionKeep(conn.id)}
-                  className="text-[10px] text-[#6B6864] dark:text-[#AAAAA4] bg-transparent border-none cursor-pointer p-0 hover:text-[#1a1a18] dark:hover:text-[#e8e8e4]"
+                  className="text-[12px] text-[#1a1a18] dark:text-[#e8e8e4] bg-transparent border-none cursor-pointer p-0 hover:opacity-60"
                 >
                   keep
                 </button>
                 <button
                   onClick={() => handleConnectionDismiss(conn.id)}
-                  className="text-[10px] text-[#6B6864] dark:text-[#AAAAA4] bg-transparent border-none cursor-pointer p-0 hover:text-[#1a1a18] dark:hover:text-[#e8e8e4]"
+                  className="text-[12px] text-[#1a1a18] dark:text-[#e8e8e4] bg-transparent border-none cursor-pointer p-0 hover:opacity-60"
                 >
                   dismiss
                 </button>
@@ -1511,7 +1530,7 @@ export function MindMapCanvas({ initialMapId, userId, sliderMode, autoDepth, onM
           ))}
           <button
             onClick={handleDismissAll}
-            className="text-[10px] text-[#6B6864] dark:text-[#AAAAA4] bg-transparent border-none cursor-pointer p-0 mt-1 hover:text-[#1a1a18] dark:hover:text-[#e8e8e4]"
+            className="text-[12px] text-[#5C5955] dark:text-[#AAAAA4] bg-transparent border-none cursor-pointer p-0 mt-1 hover:text-[#1a1a18] dark:hover:text-[#e8e8e4]"
           >
             dismiss all
           </button>

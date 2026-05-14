@@ -49,7 +49,7 @@ export function GhostNode({ data }: NodeProps<GhostNodeData>) {
   return (
     <div
       className="flex flex-col items-center gap-1"
-      style={{ opacity: data.isExpanding ? 1 : 0.4 }}
+      style={{ opacity: data.isExpanding ? 1 : 0.75 }}
     >
       <Handle
         type="target"
@@ -75,7 +75,7 @@ export function GhostNode({ data }: NodeProps<GhostNodeData>) {
             stroke="currentColor"
             strokeWidth="1"
             strokeDasharray="4 4"
-            className="text-[#CCCAC4] dark:text-[#3A3A38]"
+            className="text-[#A8A49E] dark:text-[#5A5A56]"
             fill="transparent"
           />
         </svg>
@@ -104,7 +104,7 @@ export function GhostNode({ data }: NodeProps<GhostNodeData>) {
               "
             />
           ) : (
-            <span className="text-[11px] font-mono text-center text-[#1a1a18] dark:text-[#e8e8e4] opacity-70">
+            <span className="text-[12px] font-mono text-center text-[#1a1a18] dark:text-[#e8e8e4]">
               {data.label || "..."}
             </span>
           )}
@@ -143,10 +143,10 @@ export function GhostNode({ data }: NodeProps<GhostNodeData>) {
                   }
                 }}
                 className="
-                  text-[9px] font-mono px-1.5 py-0.5 rounded
-                  text-[#888880] hover:text-[#1a1a18] dark:hover:text-[#e8e8e4]
-                  border border-[#CCCAC4] dark:border-[#3A3A38]
-                  hover:border-[#888880] transition-colors duration-100
+                  text-[11px] font-mono px-2 py-0.5 rounded
+                  text-[#1a1a18] dark:text-[#e8e8e4]
+                  border border-[#A8A49E] dark:border-[#5A5A56]
+                  hover:border-[#5C5955] dark:hover:border-[#AAAAA4] transition-colors duration-100
                 "
               >
                 keep
@@ -154,10 +154,10 @@ export function GhostNode({ data }: NodeProps<GhostNodeData>) {
               <button
                 onClick={data.onReplace}
                 className="
-                  text-[9px] font-mono px-1.5 py-0.5 rounded
-                  text-[#888880] hover:text-[#1a1a18] dark:hover:text-[#e8e8e4]
-                  border border-[#CCCAC4] dark:border-[#3A3A38]
-                  hover:border-[#888880] transition-colors duration-100
+                  text-[11px] font-mono px-2 py-0.5 rounded
+                  text-[#1a1a18] dark:text-[#e8e8e4]
+                  border border-[#A8A49E] dark:border-[#5A5A56]
+                  hover:border-[#5C5955] dark:hover:border-[#AAAAA4] transition-colors duration-100
                 "
               >
                 edit
