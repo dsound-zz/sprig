@@ -18,6 +18,8 @@ type NodeInput = {
 /**
  * Given map nodes, ask the LLM to identify cross-branch relationships.
  * Filters out the root node (parentId null) before sending.
+ * Uses short indices (n0, n1, ...) in the prompt instead of UUIDs so the
+ * small model doesn't mangle them, then maps back to real IDs after parsing.
  * Deduplicates (A→B) and (B→A). Caps at 8 pairs.
  * Returns empty array on any failure — never throws.
  */
@@ -31,20 +33,27 @@ export async function findConnections(nodes: NodeInput[]): Promise<ConnectionPai
   const nonRootNodes = nodes.filter((n) => n.parentId !== null);
   if (nonRootNodes.length < 2) return [];
 
-  const prompt = `You are analyzing a mind map. Given these nodes and their parent relationships, \
-identify pairs of nodes from DIFFERENT branches that are meaningfully related \
-to each other — not just because they share a common ancestor.
+  // Build short-ID maps so the LLM works with n0/n1/... instead of UUIDs
+  const shortId = (i: number) => `n${i}`;
+  const realToShort = new Map(nonRootNodes.map((n, i) => [n.id, shortId(i)]));
+  const shortToReal = new Map(nonRootNodes.map((n, i) => [shortId(i), n.id]));
 
-Nodes (id: label, parentId):
-${nonRootNodes.map((n) => `${n.id}: "${n.label}", parent: ${n.parentId}`).join("\n")}
+  const nodeLines = nonRootNodes.map((n, i) => {
+    const parent = n.parentId ? (realToShort.get(n.parentId) ?? "root") : "root";
+    return `${shortId(i)}: "${n.label}", parent: ${parent}`;
+  });
+
+  const prompt = `You are analyzing a mind map. Identify pairs of nodes from DIFFERENT branches that are meaningfully related to each other.
+
+Nodes:
+${nodeLines.join("\n")}
 
 Rules:
-- Only pair nodes that are on different branches (different direct children of root)
+- Pair nodes from different top-level branches only
 - Maximum 8 pairs
 - Each reason must be 40 characters or fewer
-- Do not pair a node with its own ancestor or descendant
-- Return ONLY valid JSON, no markdown, no explanation
-Format: { "connections": [{ "sourceId": "...", "targetId": "...", "reason": "..." }] }`;
+- Return ONLY valid JSON, no markdown
+Format: { "connections": [{ "sourceId": "n0", "targetId": "n3", "reason": "..." }] }`;
 
   try {
     const response = await fetch(TOGETHER_AI_URL, {
@@ -106,7 +115,6 @@ Format: { "connections": [{ "sourceId": "...", "targetId": "...", "reason": "...
     }
 
     const raw = (parsed as { connections: unknown[] }).connections;
-    const nodeIdSet = new Set(nonRootNodes.map((n) => n.id));
     const seen = new Set<string>();
     const result: ConnectionPair[] = [];
 
@@ -122,13 +130,16 @@ Format: { "connections": [{ "sourceId": "...", "targetId": "...", "reason": "...
         continue;
       }
 
-      const { sourceId, targetId, reason } = item as {
+      const { sourceId: shortSrc, targetId: shortTgt, reason } = item as {
         sourceId: string;
         targetId: string;
         reason: string;
       };
 
-      if (!nodeIdSet.has(sourceId) || !nodeIdSet.has(targetId)) continue;
+      // Map short IDs back to real UUIDs
+      const sourceId = shortToReal.get(shortSrc);
+      const targetId = shortToReal.get(shortTgt);
+      if (!sourceId || !targetId) continue;
       if (sourceId === targetId) continue;
 
       const key = [sourceId, targetId].sort().join("|");
