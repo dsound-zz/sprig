@@ -51,7 +51,7 @@ function ConnectionEdgeComponent({
       id={id}
       className="react-flow__edge-path"
       d={edgePath}
-      stroke="#7C9E87"
+      stroke="#3B6EA5"
       strokeWidth={accepted ? 1.5 : 1}
       strokeDasharray={accepted ? undefined : "6 3"}
       fill="none"
