@@ -4,9 +4,13 @@ import { eq, gt, and } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { Resend } from "resend";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
-
 const FIFTEEN_MINUTES_MS = 1000 * 60 * 15;
+
+function getResend(): Resend {
+  const key = process.env.RESEND_API_KEY;
+  if (!key) throw new Error("RESEND_API_KEY environment variable is not set");
+  return new Resend(key);
+}
 
 export function generateMagicToken(): string {
   return uuidv4();
@@ -52,7 +56,7 @@ export async function sendMagicLink(
   const appUrl = process.env.APP_URL ?? "http://localhost:3000";
   const link = `${appUrl}/api/auth/verify?token=${token}`;
 
-  await resend.emails.send({
+  await getResend().emails.send({
     from: process.env.RESEND_FROM ?? "noreply@example.com",
     to: email,
     subject: "Your Sprig login link",
