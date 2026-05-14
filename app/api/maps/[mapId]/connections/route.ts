@@ -42,6 +42,7 @@ export async function POST(
 
   try {
     const connections = await findConnections(labeledNodes);
+    console.log("[connections] raw result:", JSON.stringify(connections));
     return NextResponse.json({ connections });
   } catch {
     console.error("[connections route] Unexpected error");
