@@ -73,7 +73,7 @@ export function LoginForm() {
           w-full bg-transparent border-none outline-none
           text-[13px] font-mono text-center
           text-[#1a1a18] dark:text-[#e8e8e4]
-          placeholder:text-[#A8A49E] dark:placeholder:text-[#5A5A56]
+          placeholder:text-[#85827e] dark:placeholder:text-[#454541]
           disabled:opacity-50
         "
       />
