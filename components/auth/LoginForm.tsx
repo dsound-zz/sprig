@@ -49,19 +49,23 @@ export function LoginForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col items-center gap-4 w-64">
+    <form onSubmit={handleSubmit} className="flex flex-col items-center gap-3 w-64">
       {linkError === "invalid_link" && (
         <p className="text-[11px] font-mono text-red-500 text-center">
           That link has expired or is invalid. Try again.
         </p>
       )}
 
+      <p className="text-[12px] font-mono text-[#6B6864] dark:text-[#AAAAA4]">
+        enter your email to sign in
+      </p>
+
       <input
         type="email"
         autoFocus
         required
         autoComplete="email"
-        placeholder="your@email.com"
+        placeholder="you@example.com"
         value={email}
         onChange={(e) => setEmail(e.target.value)}
         disabled={loading}
@@ -69,7 +73,7 @@ export function LoginForm() {
           w-full bg-transparent border-none outline-none
           text-[13px] font-mono text-center
           text-[#1a1a18] dark:text-[#e8e8e4]
-          placeholder:text-[#CCCAC4] dark:placeholder:text-[#3A3A38]
+          placeholder:text-[#A8A49E] dark:placeholder:text-[#5A5A56]
           disabled:opacity-50
         "
       />
