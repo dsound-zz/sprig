@@ -87,7 +87,7 @@ export function LoginForm() {
         disabled={loading || email.trim().length === 0}
         className="
           text-[12px] font-mono
-          text-[#888880] hover:text-[#1a1a18] dark:hover:text-[#e8e8e4]
+          text-[#4d4d49] hover:text-[#1a1a18] dark:hover:text-[#e8e8e4]
           transition-colors duration-100
           disabled:opacity-30 disabled:cursor-not-allowed
         "
