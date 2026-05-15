@@ -60,6 +60,12 @@ export function CanvasShell({ initialMapId, userId }: Props) {
 
   return (
     <>
+      <div className="fixed top-4 left-1/2 -translate-x-1/2 z-10 pointer-events-none select-none">
+        <span className="text-[28px] font-medium font-mono text-[#1a1a18] dark:text-[#e8e8e4] tracking-tight">
+          Sprig
+        </span>
+      </div>
+
       <MapListPanel
         onMapSelect={handleMapSelect}
         onNewMap={handleNewMap}
